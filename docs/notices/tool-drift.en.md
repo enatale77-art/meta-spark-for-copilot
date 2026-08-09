@@ -1,6 +1,6 @@
 # Unstable Tools List
 
-Muse Spark 1.1 for Copilot Chat detected that the Tools list in the current chat may be unstable across turns.
+Muse Spark for Copilot Chat detected that the Tools list in the current chat may be unstable across turns.
 
 ## Why This Happens
 

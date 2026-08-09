@@ -23,6 +23,44 @@ export const WALKTHROUGH_ID = 'LukeSpine.meta-spark-for-copilot#metaGettingStart
 
 export const MODELS: ModelDefinition[] = [
 	{
+		id: 'muse-spark-1.2',
+		name: 'Muse Spark 1.2',
+		family: 'meta',
+		version: '1.2',
+		detail: 'Agentic coding, 1M context, native vision',
+		maxInputTokens: 1048576,
+		maxOutputTokens: 131072,
+		capabilities: {
+			toolCalling: META_TOOLS_LIMIT,
+			imageInput: true,
+			thinking: true,
+		},
+		requiresThinkingParam: false,
+		pricing: {
+			USD: { input: 1.25, cachedInput: 0.15, output: 4.25 },
+		},
+		priceCategory: 'low',
+	},
+	{
+		id: 'muse-spark-1.2-contributor',
+		name: 'Muse Spark 1.2 (Contributor)',
+		family: 'meta',
+		version: '1.2',
+		detail: 'Discounted tier, 1M context, native vision',
+		maxInputTokens: 1048576,
+		maxOutputTokens: 131072,
+		capabilities: {
+			toolCalling: META_TOOLS_LIMIT,
+			imageInput: true,
+			thinking: true,
+		},
+		requiresThinkingParam: false,
+		pricing: {
+			USD: { input: 0.1, cachedInput: 0.002, output: 0.2 },
+		},
+		priceCategory: 'low',
+	},
+	{
 		id: 'muse-spark-1.1',
 		name: 'Muse Spark 1.1',
 		family: 'meta',

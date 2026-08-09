@@ -8,6 +8,10 @@ function isZh(): boolean {
 type Translations = Record<string, string>;
 
 const zh: Translations = {
+	'model.1.2.detail': 'Agentic 编程，1M 上下文，原生视觉',
+	'model.1.2.tooltip': 'Muse Spark 1.2，面向 Agentic 编程，1M 上下文，原生视觉支持。',
+	'model.1.2-contributor.detail': '优惠档位，1M 上下文，原生视觉',
+	'model.1.2-contributor.tooltip': 'Muse Spark 1.2 贡献者档位，价格更低，提示词可能用于模型训练。',
 	'model.muse-spark-1.1.detail': 'Agentic 编程，1M 上下文，原生视觉',
 	'model.muse-spark-1.1.tooltip': 'Muse Spark 1.1，面向 Agentic 编程，1M 上下文，原生视觉支持。',
 	'auth.apiKeyRequiredDetail': '请先配置 API Key',
@@ -79,6 +83,11 @@ const zh: Translations = {
 };
 
 const en: Translations = {
+	'model.1.2.detail': 'Agentic coding, 1M context, native vision',
+	'model.1.2.tooltip': 'Muse Spark 1.2 for agentic coding, 1M context, native vision.',
+	'model.1.2-contributor.detail': 'Discounted tier, 1M context, native vision',
+	'model.1.2-contributor.tooltip':
+		'Muse Spark 1.2 Contributor tier at discounted pricing; prompts may be used for training.',
 	'model.muse-spark-1.1.detail': 'Agentic coding, 1M context, native vision',
 	'model.muse-spark-1.1.tooltip': 'Muse Spark 1.1 for agentic coding, 1M context, native vision.',
 	'model.flash.detail': 'Fast, general-purpose model',

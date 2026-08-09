@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.0.0
+
+### Features
+
+- **Muse Spark 1.2** added to the Copilot Chat model picker — the current Meta default checkpoint with slightly higher performance
+- **Muse Spark 1.2 (Contributor)** added — same 1.2 checkpoint at heavily discounted Contributor-tier pricing ($0.10 / 1M input, $0.002 / 1M cached, $0.20 / 1M output)
+- Muse Spark 1.1 remains available for existing users
+- Model ID overrides now cover all three model IDs (`muse-spark-1.1`, `muse-spark-1.2`, `muse-spark-1.2-contributor`)
+- Pricing and rate-limit documentation updated for Standard and Contributor tiers
+
+### Notes
+
+- **Major release (2.0.0)**: new model checkpoint plus a new tier. Existing chats that reference `muse-spark-1.1` continue to work.
+- All models share 1,048,576 context, 131,072 max output, and native text/image/video/PDF input.
+
 ## 1.0.1
 
 ### Changes

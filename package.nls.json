@@ -5,8 +5,8 @@
   "meta-spark.command.openSettings": "Meta Spark: Open Settings",
   "meta-spark.command.showLogs": "Meta Spark: Show Logs",
   "meta-spark.command.openRequestDumpsFolder": "Meta Spark: Open Request Dumps Folder",
-  "meta-spark.walkthrough.title": "Muse Spark 1.1 for Copilot Chat",
-  "meta-spark.walkthrough.description": "Set up Muse Spark 1.1 in Copilot Chat.",
+  "meta-spark.walkthrough.title": "Muse Spark for Copilot Chat",
+  "meta-spark.walkthrough.description": "Set up Muse Spark 1.2 (and 1.1) in Copilot Chat.",
   "meta-spark.walkthrough.setApiKey.title": "Set your Meta API key",
   "meta-spark.walkthrough.setApiKey.description": "[Get an API key](command:meta-spark.getApiKey) from dev.meta.ai.\n[Set API Key](command:meta-spark.setApiKey)",
   "meta-spark.walkthrough.showModels.title": "Show Meta models",
@@ -26,5 +26,7 @@
   "meta-spark.config.debugMode.verbose.label": "Verbose",
   "meta-spark.config.debugMode.verbose.description": "\u26a0\ufe0f Contains sensitive prompt content. For local debugging only.",
   "meta-spark.config.modelIdOverrides.description": "Override the API model ID sent for each Meta model. Defaults are prefilled with official IDs; change them only when using a compatible third-party API that uses different model names.",
-  "meta-spark.config.modelIdOverrides.muse-spark-1.1.description": "API model ID for Muse Spark 1.1"
+  "meta-spark.config.modelIdOverrides.muse-spark-1.1.description": "API model ID for Muse Spark 1.1",
+  "meta-spark.config.modelIdOverrides.muse-spark-1.2.description": "API model ID for Muse Spark 1.2",
+  "meta-spark.config.modelIdOverrides.muse-spark-1.2-contributor.description": "API model ID for Muse Spark 1.2 (Contributor tier)"
 }

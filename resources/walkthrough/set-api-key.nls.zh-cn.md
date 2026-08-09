@@ -1,4 +1,4 @@
-Muse Spark 1.1 for Copilot Chat 使用你自己的 Meta API Key，让 Muse Spark 1.1 出现在模型选择器中。
+Muse Spark for Copilot Chat 使用你自己的 Meta API Key，让 Muse Spark 1.2（及 1.1）出现在模型选择器中。
 
 只需粘贴一次，之后可通过命令面板更新或移除。
 

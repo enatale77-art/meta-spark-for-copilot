@@ -1,4 +1,4 @@
-Muse Spark 1.1 for Copilot Chat uses your own Meta API key to make Muse Spark 1.1 available in the model picker.
+Muse Spark for Copilot Chat uses your own Meta API key to make Muse Spark 1.2 (and 1.1) available in the model picker.
 
 Paste it once, then update or remove it later from the Command Palette.
 

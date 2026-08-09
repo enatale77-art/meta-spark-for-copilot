@@ -1,9 +1,9 @@
 {
   "name": "meta-spark-for-copilot",
-  "displayName": "Muse Spark 1.1 for Copilot Chat",
-  "description": "Add Meta Muse Spark 1.1 as a model provider in GitHub Copilot Chat. 1M context window with native image, video, and PDF understanding. Configure reasoning depth from minimal to xhigh. Bring your own Meta API key.",
+  "displayName": "Muse Spark 1.2 for Copilot Chat",
+  "description": "Add Meta Muse Spark 1.2 (and 1.1) as a model provider in GitHub Copilot Chat. 1M context window with native image, video, and PDF understanding. Standard and discounted Contributor tiers. Configure reasoning depth from minimal to xhigh. Bring your own Meta API key.",
   "icon": "resources/icon.png",
-  "version": "1.0.2",
+  "version": "2.0.0",
   "publisher": "LukeSpine",
   "license": "MIT",
   "repository": {
@@ -27,6 +27,7 @@
     "meta",
     "meta ai",
     "muse spark",
+    "muse spark 1.2",
     "llama",
     "multimodal",
     "copilot",
@@ -36,6 +37,7 @@
     "byok",
     "language model provider",
     "reasoning effort",
+    "contributor tier",
     "ai",
     "chat"
   ],
@@ -146,7 +148,9 @@
         "meta-spark-copilot.modelIdOverrides": {
           "type": "object",
           "default": {
-            "muse-spark-1.1": "muse-spark-1.1"
+            "muse-spark-1.1": "muse-spark-1.1",
+            "muse-spark-1.2": "muse-spark-1.2",
+            "muse-spark-1.2-contributor": "muse-spark-1.2-contributor"
           },
           "description": "%meta-spark.config.modelIdOverrides.description%",
           "additionalProperties": false,
@@ -154,6 +158,14 @@
             "muse-spark-1.1": {
               "type": "string",
               "description": "%meta-spark.config.modelIdOverrides.muse-spark-1.1.description%"
+            },
+            "muse-spark-1.2": {
+              "type": "string",
+              "description": "%meta-spark.config.modelIdOverrides.muse-spark-1.2.description%"
+            },
+            "muse-spark-1.2-contributor": {
+              "type": "string",
+              "description": "%meta-spark.config.modelIdOverrides.muse-spark-1.2-contributor.description%"
             }
           }
         },
