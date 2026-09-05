@@ -1,9 +1,9 @@
 {
   "name": "meta-spark-for-copilot",
-  "displayName": "Muse Spark 1.2 for Copilot Chat",
-  "description": "Add Meta Muse Spark 1.2 (and 1.1) as a model provider in GitHub Copilot Chat. 1M context window with native image, video, and PDF understanding. Standard and discounted Contributor tiers. Configure reasoning depth from minimal to xhigh. Bring your own Meta API key.",
+  "displayName": "Muse Spark 1.3 for Copilot Chat",
+  "description": "Add Meta Muse Spark 1.3 (plus 1.2 and 1.1) as a model provider in GitHub Copilot Chat. 1M context window with native image, video, and PDF understanding. Standard and discounted Contributor tiers. Reasoning effort from minimal to max. Bring your own Meta API key.",
   "icon": "resources/icon.png",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "publisher": "LukeSpine",
   "license": "MIT",
   "repository": {
@@ -27,6 +27,7 @@
     "meta",
     "meta ai",
     "muse spark",
+    "muse spark 1.3",
     "muse spark 1.2",
     "llama",
     "multimodal",
@@ -150,7 +151,9 @@
           "default": {
             "muse-spark-1.1": "muse-spark-1.1",
             "muse-spark-1.2": "muse-spark-1.2",
-            "muse-spark-1.2-contributor": "muse-spark-1.2-contributor"
+            "muse-spark-1.2-contributor": "muse-spark-1.2-contributor",
+            "muse-spark-1.3": "muse-spark-1.3",
+            "muse-spark-1.3-contributor": "muse-spark-1.3-contributor"
           },
           "description": "%meta-spark.config.modelIdOverrides.description%",
           "additionalProperties": false,
@@ -166,6 +169,14 @@
             "muse-spark-1.2-contributor": {
               "type": "string",
               "description": "%meta-spark.config.modelIdOverrides.muse-spark-1.2-contributor.description%"
+            },
+            "muse-spark-1.3": {
+              "type": "string",
+              "description": "%meta-spark.config.modelIdOverrides.muse-spark-1.3.description%"
+            },
+            "muse-spark-1.3-contributor": {
+              "type": "string",
+              "description": "%meta-spark.config.modelIdOverrides.muse-spark-1.3-contributor.description%"
             }
           }
         },
@@ -194,7 +205,7 @@
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('out', { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 10 : 0 })\"",
-    "vscode:prepublish": "bash .github/scripts/prepare-marketplace-readme.sh && npm run compile",
+    "vscode:prepublish": "bash scripts/prepare-marketplace-readme.sh && npm run compile",
     "compile": "npm run clean && tsc -p ./",
     "watch": "npm run clean && tsc -watch -p ./",
     "lint": "oxlint",

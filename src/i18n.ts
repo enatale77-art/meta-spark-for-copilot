@@ -8,6 +8,10 @@ function isZh(): boolean {
 type Translations = Record<string, string>;
 
 const zh: Translations = {
+	'model.1.3.detail': 'Agentic 编程，1M 上下文，原生视觉',
+	'model.1.3.tooltip': 'Muse Spark 1.3，面向 Agentic 工作流与编程，1M 上下文，支持 max 推理。',
+	'model.1.3-contributor.detail': '优惠档位，1M 上下文，原生视觉',
+	'model.1.3-contributor.tooltip': 'Muse Spark 1.3 贡献者档位，价格更低，提示词可能用于模型训练。',
 	'model.1.2.detail': 'Agentic 编程，1M 上下文，原生视觉',
 	'model.1.2.tooltip': 'Muse Spark 1.2，面向 Agentic 编程，1M 上下文，原生视觉支持。',
 	'model.1.2-contributor.detail': '优惠档位，1M 上下文，原生视觉',
@@ -34,8 +38,8 @@ const zh: Translations = {
 	'thinking.xhigh.desc': '最大推理深度',
 	'thinking.none': '最小',
 	'thinking.none.desc': '最快响应',
-	'thinking.max': '极高',
-	'thinking.max.desc': '最大推理深度',
+	'thinking.max': '最大',
+	'thinking.max.desc': '超出 xhigh 的扩展推理（仅 1.3 标准档）',
 	'vision.proxyUsing': '视觉：{0}',
 	'vision.notFound': '未找到视觉模型 "{0}"',
 	'vision.unavailable': '无可用视觉模型，图片已忽略。',
@@ -83,6 +87,11 @@ const zh: Translations = {
 };
 
 const en: Translations = {
+	'model.1.3.detail': 'Agentic coding, 1M context, native vision',
+	'model.1.3.tooltip': 'Muse Spark 1.3 for agentic workflows and coding, 1M context, up to max reasoning.',
+	'model.1.3-contributor.detail': 'Discounted tier, 1M context, native vision',
+	'model.1.3-contributor.tooltip':
+		'Muse Spark 1.3 Contributor tier at discounted pricing; prompts may be used for training.',
 	'model.1.2.detail': 'Agentic coding, 1M context, native vision',
 	'model.1.2.tooltip': 'Muse Spark 1.2 for agentic coding, 1M context, native vision.',
 	'model.1.2-contributor.detail': 'Discounted tier, 1M context, native vision',
@@ -115,8 +124,8 @@ const en: Translations = {
 	'thinking.xhigh.desc': 'Maximum reasoning depth',
 	'thinking.none': 'Minimal',
 	'thinking.none.desc': 'Fastest',
-	'thinking.max': 'Extra High',
-	'thinking.max.desc': 'Maximum reasoning',
+	'thinking.max': 'Max',
+	'thinking.max.desc': 'Extended reasoning beyond xhigh (Muse Spark 1.3 Standard tier)',
 	'vision.proxyUsing': 'Vision: {0}',
 	'vision.notFound': 'Vision model "{0}" not found',
 	'vision.unavailable': 'No vision models available, image(s) ignored',

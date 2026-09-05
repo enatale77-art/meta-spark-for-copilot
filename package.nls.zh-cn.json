@@ -6,7 +6,7 @@
   "meta-spark.command.showLogs": "Meta Spark: 显示日志",
   "meta-spark.command.openRequestDumpsFolder": "Meta Spark: 打开请求 Dump 目录",
   "meta-spark.walkthrough.title": "Muse Spark for Copilot Chat",
-  "meta-spark.walkthrough.description": "在 Copilot Chat 中配置 Muse Spark 1.2（及 1.1）。",
+  "meta-spark.walkthrough.description": "在 Copilot Chat 中配置 Muse Spark 1.3（及更早版本）。",
   "meta-spark.walkthrough.setApiKey.title": "设置 Meta API Key",
   "meta-spark.walkthrough.setApiKey.description": "从 dev.meta.ai [获取 API Key](command:meta-spark.getApiKey)。\n[设置 API Key](command:meta-spark.setApiKey)",
   "meta-spark.walkthrough.showModels.title": "显示 Meta 模型",
@@ -28,5 +28,7 @@
   "meta-spark.config.modelIdOverrides.description": "覆盖发送给 API 的模型 ID。",
   "meta-spark.config.modelIdOverrides.muse-spark-1.1.description": "Muse Spark 1.1 的 API 模型 ID",
   "meta-spark.config.modelIdOverrides.muse-spark-1.2.description": "Muse Spark 1.2 的 API 模型 ID",
-  "meta-spark.config.modelIdOverrides.muse-spark-1.2-contributor.description": "Muse Spark 1.2（贡献者档位）的 API 模型 ID"
+  "meta-spark.config.modelIdOverrides.muse-spark-1.2-contributor.description": "Muse Spark 1.2（贡献者档位）的 API 模型 ID",
+  "meta-spark.config.modelIdOverrides.muse-spark-1.3.description": "Muse Spark 1.3 的 API 模型 ID",
+  "meta-spark.config.modelIdOverrides.muse-spark-1.3-contributor.description": "Muse Spark 1.3（贡献者档位）的 API 模型 ID"
 }

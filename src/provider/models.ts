@@ -3,7 +3,7 @@ import { t } from '../i18n';
 import type { ModelDefinition, PricingCurrency } from '../types';
 import { toModelCostInfo, type ModelCostInformation } from './pricing/costs';
 
-export type ThinkingEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type ThinkingEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export type ModelConfigurationOptions = vscode.ProvideLanguageModelChatResponseOptions & {
 	readonly modelConfiguration?: Record<string, unknown>;
@@ -44,7 +44,7 @@ export function toChatInfo(
 			imageInput: m.capabilities.imageInput,
 		},
 		...toModelCostInfo(m, pricingCurrency),
-		...(m.capabilities.thinking ? { configurationSchema: buildThinkingEffortSchema() } : {}),
+		...(m.capabilities.thinking ? { configurationSchema: buildThinkingEffortSchema(m) } : {}),
 	};
 }
 
@@ -59,39 +59,41 @@ export function getConfiguredThinkingEffort(options: ModelConfigurationOptions):
 		if (normalized === 'low') return 'low';
 		if (normalized === 'medium') return 'medium';
 		if (normalized === 'high') return 'high';
-		if (
-			normalized === 'xhigh' ||
-			normalized === 'max' ||
-			normalized === 'extra-high' ||
-			normalized === 'extra_high'
-		)
+		if (normalized === 'xhigh' || normalized === 'extra-high' || normalized === 'extra_high')
 			return 'xhigh';
+		if (normalized === 'max') return 'max';
 	}
 
 	return 'medium';
 }
 
-function buildThinkingEffortSchema() {
+function buildThinkingEffortSchema(m: ModelDefinition) {
+	const supportsMax = m.supportsMaxReasoningEffort === true;
+	const efforts = ['minimal', 'low', 'medium', 'high', 'xhigh', ...(supportsMax ? ['max'] : [])];
+	const labels = [
+		t('thinking.minimal'),
+		t('thinking.low'),
+		t('thinking.medium'),
+		t('thinking.high'),
+		t('thinking.xhigh'),
+		...(supportsMax ? [t('thinking.max')] : []),
+	];
+	const descriptions = [
+		t('thinking.minimal.desc'),
+		t('thinking.low.desc'),
+		t('thinking.medium.desc'),
+		t('thinking.high.desc'),
+		t('thinking.xhigh.desc'),
+		...(supportsMax ? [t('thinking.max.desc')] : []),
+	];
 	return {
 		properties: {
 			reasoningEffort: {
 				type: 'string',
 				title: t('status.thinking'),
-				enum: ['minimal', 'low', 'medium', 'high', 'xhigh'],
-				enumItemLabels: [
-					t('thinking.minimal'),
-					t('thinking.low'),
-					t('thinking.medium'),
-					t('thinking.high'),
-					t('thinking.xhigh'),
-				],
-				enumDescriptions: [
-					t('thinking.minimal.desc'),
-					t('thinking.low.desc'),
-					t('thinking.medium.desc'),
-					t('thinking.high.desc'),
-					t('thinking.xhigh.desc'),
-				],
+				enum: efforts,
+				enumItemLabels: labels,
+				enumDescriptions: descriptions,
 				default: 'medium',
 				group: 'navigation',
 			},

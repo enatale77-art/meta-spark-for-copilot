@@ -55,7 +55,7 @@ export interface MetaUsage {
 	prompt_cache_miss_tokens?: number;
 }
 
-export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface MetaRequest {
 	model: string;
@@ -140,6 +140,11 @@ export interface ModelDefinition {
 		thinking: boolean;
 	};
 	requiresThinkingParam: boolean;
+	/**
+	 * Model supports the `max` reasoning effort level.
+	 * Muse Spark 1.3 on the Standard tier only; not available on Contributor-tier models.
+	 */
+	supportsMaxReasoningEffort?: boolean;
 	pricing?: Readonly<Record<PricingCurrency, ModelPricing>>;
 	priceCategory?: PriceCategory;
 }

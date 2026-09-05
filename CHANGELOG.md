@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.1.0
+
+### Features
+
+- **Muse Spark 1.3** added to the Copilot Chat model picker — the latest checkpoint, tuned for agentic workflows (multi-step tool, browser, and long-horizon tasks) with improved coding over 1.2
+- **Muse Spark 1.3 (Contributor)** added — same 1.3 checkpoint at heavily discounted Contributor-tier pricing ($0.10 / 1M input, $0.002 / 1M cached, $0.20 / 1M output)
+- **`max` reasoning effort** added to the model picker for Standard-tier `muse-spark-1.3` (extended reasoning beyond `xhigh`). Safely clamped to `xhigh` on models that do not support it
+- Muse Spark 1.1 and 1.2 (Standard and Contributor) remain available
+- Model ID overrides now cover all five model IDs (`muse-spark-1.1`, `muse-spark-1.2`, `muse-spark-1.2-contributor`, `muse-spark-1.3`, `muse-spark-1.3-contributor`)
+- Contributor-tier rate limits updated (100 RPM / 3M TPM per team)
+
+### Notes
+
+- **Minor release (2.1.0)**: additive model checkpoints and a new reasoning level; existing models and settings are unchanged.
+- All models share 1,048,576 context, 131,072 max output, and native text/image/video/PDF input. Audio input: use Muse Spark 1.2 (1.3 audio support is not fully ready).
+
 ## 2.0.0
 
 ### Features

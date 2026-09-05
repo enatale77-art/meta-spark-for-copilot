@@ -87,7 +87,14 @@ export async function prepareChatRequest({
 	);
 	const forceMinimalThinking =
 		shouldForceMinimalThinking(requestKind) && isOfficialMetaBaseUrl(baseUrl);
-	const thinkingEffort = forceMinimalThinking ? 'minimal' : configuredThinkingEffort;
+	// The `max` reasoning effort is only available on Standard-tier muse-spark-1.3.
+	// Clamp it to `xhigh` for models that do not support it.
+	const thinkingEffort =
+		forceMinimalThinking
+			? 'minimal'
+			: configuredThinkingEffort === 'max' && modelDef?.supportsMaxReasoningEffort !== true
+				? 'xhigh'
+				: configuredThinkingEffort;
 	const request: MetaRequest = {
 		...baseRequest,
 		...(isThinkingModel

@@ -1,4 +1,4 @@
-# Muse Spark 1.2 for Copilot Chat
+# Muse Spark 1.3 for Copilot Chat
 
 <p align="center">
   <!-- marketplace-readme:remove-start -->
@@ -14,7 +14,7 @@
   简体中文
 </p>
 
-**在 Copilot Chat 模型选择器中直接使用 Muse Spark 1.2（以及 1.1 与折扣贡献者档位）——原生视觉、推理强度控制与 Agent 工具。**
+**在 Copilot Chat 模型选择器中直接使用 Muse Spark 1.3（以及 1.2、1.1 与折扣贡献者档位）——原生视觉、推理强度控制与 Agent 工具。**
 
 <p align="center">
   <img src="resources/screenshots/01-picker.png" alt="Muse Spark 出现在 Copilot Chat 模型选择器中" width="800">
@@ -29,12 +29,12 @@
 
 ## 功能特性
 
-### 模型选择器中的 Muse Spark 1.2
-- `muse-spark-1.2` —— 更新检查点，性能略高，Meta 当前默认模型
-- `muse-spark-1.2-contributor` —— 同一检查点的贡献者档位，价格大幅优惠（提示词可能用于训练）
-- `muse-spark-1.1` —— 早期检查点，继续支持
+### 模型选择器中的 Muse Spark 1.3
+- `muse-spark-1.3` —— 最新检查点，针对 Agentic 工作流调优，编程能力较 1.2 提升
+- `muse-spark-1.3-contributor` —— 同一检查点的贡献者档位，价格大幅优惠（提示词可能用于训练）
+- `muse-spark-1.2` / `muse-spark-1.1` —— 更早检查点，继续支持
 
-全部支持 1,048,576 上下文、131,072 最大输出，多模态输入（文本/图片/视频/PDF），文本输出。可在对话中途切换模型，不丢失聊天历史。
+全部支持 1,048,576 上下文、131,072 最大输出，多模态输入（文本/图片/视频/PDF），文本输出。音频输入请使用 1.2（1.3 音频支持尚未完全就绪）。可在对话中途切换模型，不丢失聊天历史。
 
 ### 原生视觉
 将图片拖入聊天后，会以 base64 data URL 形式作为 `image_url` 内容发送。无需代理，无需额外配置。
@@ -44,7 +44,7 @@
 </p>
 
 ### 推理强度控制
-完整支持 `reasoning_effort`：`minimal`（最快）、`low`、`medium`（均衡，默认）、`high`（深度）、`xhigh`（最大）。通过 Copilot Chat 模型选择器菜单设置。注意：Meta API 不支持 `none`，会映射为 `minimal`。
+完整支持 `reasoning_effort`：`minimal`（最快）、`low`、`medium`（均衡，默认）、`high`（深度）、`xhigh`，以及 `max`（仅 `muse-spark-1.3` 标准档）。通过 Copilot Chat 模型选择器菜单设置。注意：Meta API 不支持 `none`，会映射为 `minimal`。
 
 ### 继承全部 Copilot 能力
 Agent 模式、工具调用（文件编辑、终端等）、自定义 Instructions、MCP、Skills——因为本扩展实现了 `vscode.LanguageModelChatProvider`。
@@ -70,7 +70,7 @@ Agent 模式、工具调用（文件编辑、终端等）、自定义 Instructio
 
 1. 命令面板（`Cmd/Ctrl+Shift+P`）运行 **Meta Spark: 设置 API Key**
 2. 粘贴你的 Meta API Key（`LLM...`）
-3. 打开 Copilot Chat，选择 **Muse Spark 1.2**
+3. 打开 Copilot Chat，选择 **Muse Spark 1.3**
 
 ## 设置项
 
@@ -84,15 +84,16 @@ Agent 模式、工具调用（文件编辑、终端等）、自定义 Instructio
 
 ## 定价
 
-**标准档位**（`muse-spark-1.1`、`muse-spark-1.2`）
+**标准档位**（`muse-spark-1.1`、`muse-spark-1.2`、`muse-spark-1.3`）
 
 - 输入 $1.25 / 1M，缓存输入 $0.15 / 1M，输出 $4.25 / 1M。无长上下文溢价。
 - 速率限制：3000 RPM / 4M TPM（按团队）
+- `max` 推理强度仅限 `muse-spark-1.3`（标准档）
 
-**贡献者档位**（`muse-spark-1.2-contributor`）
+**贡献者档位**（`muse-spark-1.2-contributor`、`muse-spark-1.3-contributor`）
 
 - 输入 $0.10 / 1M，缓存输入 $0.002 / 1M，输出 $0.20 / 1M
-- 速率限制：60 RPM / 2.1M TPM（按团队）
+- 速率限制：100 RPM / 3M TPM（按团队）
 - 你的提示词与补全内容可能被用于训练未来的 Meta 模型
 
 详见 [Meta 定价](https://dev.meta.ai/docs/getting-started/pricing-rate-limits)。
@@ -131,14 +132,10 @@ npm run package
 
 **版本管理（SemVer）：**
 
-- 本次为**主版本发布**（`2.0.0`）。主版本号提升表示新的模型检查点或设置/模型 ID 的破坏性变更。
-- 仓库使用 [release-please](https://github.com/googleapis/release-please)（基于 `main` 分支）。它根据 conventional commits 推导下一版本：
-  - `feat!:` 或 `fix!:`（破坏性）→ 主版本提升
-  - `feat:` → 次版本提升
-  - `fix:` / `perf:` → 修订版本提升
-- 触发下一次发布：将 conventional commits 合并到 `main`。Release Please 会打开发布 PR；合并后打上 `v<版本>` 标签，[Release 工作流](.github/workflows/release.yml) 会自动构建并发布 VSIX 到 VS Code Marketplace、Open VSX 与 GitHub Releases。
-- 扩展版本号位于 `package.json`（`version`），并同步到 `.github/release-please-manifest.json`。手动提升时请保持两者一致。
-- CHANGELOG 条目由提交信息生成；请在 Release Please 生成的 `## <版本>` 标题下补充发布说明。
+- 版本为手动管理。扩展版本号位于 `package.json`（`version`）。完整指南见 `docs/RELEASE.md`。
+- 新增模型检查点 / 档位 / 能力等（相当于 `feat:`）提升**次版本**；设置或模型 ID 的破坏性变更提升**主版本**；小修复（相当于 `fix:`）提升**修订版本**。
+- 本次为 **2.1.0**（次版本）：新增 Muse Spark 1.3、1.3 贡献者档位与 `max` 推理强度，不破坏既有模型或设置。
+- 发布流程：提升 `package.json` 中的 `version`，在 `CHANGELOG.md` 添加条目，运行 `npm run package` 构建并测试，再用 `vsce` / `ovsx` 发布并在 GitHub 打上发布标签。
 
 ## 许可证
 
