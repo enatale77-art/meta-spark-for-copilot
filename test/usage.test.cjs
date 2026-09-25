@@ -11,6 +11,7 @@ const {
 	filterByTime,
 	rollupChats,
 	rollupTasks,
+	rollupUnassignedOverhead,
 } = require('../out/usage/aggregate.js');
 const {
 	allocateUsageContext,
@@ -31,6 +32,7 @@ const {
 	usageClearTargets,
 } = require('../out/usage/storage.js');
 const { emptyContexts } = require('../out/usage/types.js');
+const { selectStatusTask } = require('../out/usage/statusSelection.js');
 const { MODELS } = require('../out/consts.js');
 
 function userText(text) {
@@ -291,6 +293,36 @@ describe('correlation', () => {
 		}
 	});
 
+	it('utility/background with a valid marker inherits the current task; without it stays unassigned', () => {
+		const chatId = randomUUID();
+		const taskId = randomUUID();
+		const marker = { valid: true, chatId, taskId, version: 1, writer: 'meta-spark-for-copilot' };
+		for (const kind of ['terminal-steering', 'todo-tracker', 'chat-title', 'git-commit-message', 'background']) {
+			const inherited = allocateUsageContext({
+				messages: [userText('task work'), markerHolder(chatId, taskId)],
+				requestKind: kind,
+				marker,
+				projectId: 'project-1',
+				projectName: 'Demo',
+			});
+			assert.equal(inherited.unassigned, false);
+			assert.equal(inherited.chatId, chatId);
+			assert.equal(inherited.taskId, taskId);
+			assert.equal(inherited.inherited, true);
+			assert.equal(inherited.isNewTask, false);
+			const unassigned = allocateUsageContext({
+				messages: [userText('background work')],
+				requestKind: kind,
+				marker: undefined,
+				projectId: 'project-1',
+				projectName: 'Demo',
+			});
+			assert.equal(unassigned.unassigned, true);
+			assert.equal(unassigned.chatId, null);
+			assert.equal(unassigned.taskId, null);
+		}
+	});
+
 	it('marker round-trip: encode/decode preserves ids; version/writer/payload errors rejected', () => {
 		const chatId = randomUUID();
 		const taskId = randomUUID();
@@ -353,6 +385,124 @@ describe('persistence', () => {
 	it('clear-history scope targets only usage-v1 files', () => {
 		assert.deepEqual(usageClearTargets(), ['usage-v1/requests.jsonl', 'usage-v1/contexts.json']);
 	});
+
+	it('true-append ledger keeps prior records across sequential appends', async () => {
+		const Module = require('node:module');
+		const { mkdtempSync } = require('node:fs');
+		const { tmpdir } = require('node:os');
+		const { join } = require('node:path');
+		const stubPath = join(__dirname, 'vscode-stub.cjs');
+		const originalResolve = Module._resolveFilename;
+		Module._resolveFilename = function (request, ...rest) {
+			if (request === 'vscode') {
+				return stubPath;
+			}
+			return originalResolve.call(this, request, ...rest);
+		};
+		try {
+			const { createFileUsageStore } = require('../out/usage/fileStore.js');
+			const dir = mkdtempSync(join(tmpdir(), 'usage-ledger-'));
+			const fakeUri = { fsPath: dir, scheme: 'file' };
+			const store = createFileUsageStore(fakeUri);
+			const first = makeRecord({ id: 'append-1', taskPreview: 'first' });
+			const second = makeRecord({ id: 'append-2', taskPreview: 'second' });
+			await store.appendRequest(first);
+			await store.appendRequest(second);
+			const ledger = await store.readRequests();
+			assert.equal(ledger.records.length, 2);
+			assert.equal(ledger.records[0].id, 'append-1');
+			assert.equal(ledger.records[1].id, 'append-2');
+			assert.equal(ledger.corruptedLines, 0);
+		} finally {
+			Module._resolveFilename = originalResolve;
+		}
+	});
+
+	it('non-missing ledger read errors surface instead of reporting an empty ledger', async () => {
+		const Module = require('node:module');
+		const { join } = require('node:path');
+		const stubPath = join(__dirname, 'vscode-stub.cjs');
+		const originalResolve = Module._resolveFilename;
+		Module._resolveFilename = function (request, ...rest) {
+			if (request === 'vscode') {
+				return stubPath;
+			}
+			return originalResolve.call(this, request, ...rest);
+		};
+		try {
+			const { createFileUsageStore } = require('../out/usage/fileStore.js');
+			const boom = new Error('EACCES: permission denied');
+			const unreadableFs = {
+				mkdir: async () => undefined,
+				appendFile: async () => undefined,
+				readFile: async () => {
+					throw boom;
+				},
+				writeFile: async () => undefined,
+				unlink: async () => undefined,
+				rename: async () => undefined,
+				readdir: async () => [],
+				isNotFound: () => false,
+			};
+			const store = createFileUsageStore({ fsPath: '/virtual-usage', scheme: 'file' }, { nodeFs: unreadableFs });
+			await assert.rejects(() => store.readRequests(), /EACCES/);
+		} finally {
+			Module._resolveFilename = originalResolve;
+		}
+	});
+
+	it('clearAll drops the contexts cache so later requests cannot resurrect cleared metadata', async () => {
+		const Module = require('node:module');
+		const { join } = require('node:path');
+		const stubPath = join(__dirname, 'vscode-stub.cjs');
+		const originalResolve = Module._resolveFilename;
+		Module._resolveFilename = function (request, ...rest) {
+			if (request === 'vscode') {
+				return stubPath;
+			}
+			return originalResolve.call(this, request, ...rest);
+		};
+		const originalWarn = console.warn;
+		console.warn = () => undefined;
+		try {
+			const { createMemoryUsageStore } = require('../out/usage/storage.js');
+			const { UsageService } = require('../out/usage/recorder.js');
+			const store = createMemoryUsageStore();
+			const service = new UsageService({
+				store,
+				getWorkspaceUris: () => ['file:///demo'],
+				getWorkspaceName: () => 'Demo',
+			});
+			const pending = await service.beginRequest({
+				messages: [],
+				requestKind: 'main-agent',
+				vscodeModelId: 'muse-spark-1.3',
+				apiModelId: 'muse-spark-1.3',
+			});
+			assert.ok(pending.allocation.chatId);
+			assert.ok(pending.allocation.taskId);
+			const before = await store.readContexts();
+			assert.equal(Object.keys(before.chats).length, 1);
+
+			await service.clearAll();
+			const cleared = await store.readContexts();
+			assert.deepEqual(cleared, emptyContexts());
+
+			// The service cache was invalidated with storage; the next request
+			// must not write the stale pre-clear chat/task back to disk.
+			await service.beginRequest({
+				messages: [],
+				requestKind: 'chat-title',
+				vscodeModelId: 'muse-spark-1.3',
+				apiModelId: 'muse-spark-1.3',
+			});
+			const after = await store.readContexts();
+			assert.deepEqual(after, emptyContexts());
+		} finally {
+			Module._resolveFilename = originalResolve;
+			console.warn = originalWarn;
+		}
+	});
 });
 
 describe('aggregation', () => {
@@ -395,6 +545,47 @@ describe('aggregation', () => {
 		assert.equal(filterByTime(records, now, 7).length, 2);
 		assert.equal(filterByTime(records, now, 1).length, 1);
 		assert.equal(filterByTime(records, now, null).length, 2);
+	});
+
+	it('unassigned overhead groups by kind and excludes task records', () => {
+		const records = [
+			makeRecord({ chatId: null, taskId: null, requestKind: 'chat-title', promptTokens: 100, cachedInputTokens: 10, uncachedInputTokens: 90, completionTokens: 5, totalTokens: 105, estimatedCostUsd: 0.001 }),
+			makeRecord({ chatId: null, taskId: null, requestKind: 'chat-title', promptTokens: 200, cachedInputTokens: 20, uncachedInputTokens: 180, completionTokens: 10, totalTokens: 210, estimatedCostUsd: 0.002 }),
+			makeRecord({ chatId: 'chat-a', taskId: 'task-a', requestKind: 'main-agent', promptTokens: 300, cachedInputTokens: 30, uncachedInputTokens: 270, completionTokens: 15, totalTokens: 315, estimatedCostUsd: 0.003 }),
+		];
+		const overhead = rollupUnassignedOverhead(records);
+		assert.equal(overhead.requests, 2);
+		assert.equal(overhead.inputTokens, 300);
+		assert.equal(Object.keys(overhead.byKind).length, 1);
+		assert.equal(overhead.byKind['chat-title'].requests, 2);
+		assert.equal(overhead.byKind['chat-title'].estimatedCostUsd, 0.003);
+	});
+});
+
+describe('status selection', () => {
+	it('status bar selects the active project task and ignores other projects', () => {
+		const now = Date.now();
+		const projectA = deriveProjectId(['file:///a']).projectId;
+		const projectB = deriveProjectId(['file:///b']).projectId;
+		const records = [
+			makeRecord({ projectId: projectB, projectName: 'B', taskId: 'task-b', chatId: 'chat-b', timestampMs: now, taskPreview: 'Other project' }),
+			makeRecord({ projectId: projectA, projectName: 'A', taskId: 'task-a', chatId: 'chat-a', timestampMs: now - 1000, taskPreview: 'Active project' }),
+		];
+		const selected = selectStatusTask({ records, workspaceUris: ['file:///a'], nowMs: now });
+		assert.equal(selected.projectId, projectA);
+		assert.equal(selected.latest?.taskId, 'task-a');
+		assert.equal(selected.taskRecords.length, 1);
+	});
+
+	it('status bar shows empty when the active workspace has no usage', () => {
+		const now = Date.now();
+		const projectB = deriveProjectId(['file:///b']).projectId;
+		const records = [
+			makeRecord({ projectId: projectB, projectName: 'B', taskId: 'task-b', chatId: 'chat-b', timestampMs: now }),
+		];
+		const selected = selectStatusTask({ records, workspaceUris: ['file:///a'], nowMs: now });
+		assert.equal(selected.latest, undefined);
+		assert.deepEqual(selected.taskRecords, []);
 	});
 });
 

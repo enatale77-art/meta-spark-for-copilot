@@ -41,6 +41,10 @@ export interface ProjectRollup extends RequestTotals {
 	projectName: string;
 }
 
+export interface OverheadRollup extends RequestTotals {
+	byKind: Record<string, RequestTotals>;
+}
+
 const EMPTY: RequestTotals = {
 	requests: 0,
 	billableRequests: 0,
@@ -228,4 +232,24 @@ export function filterByTime(
 	}
 	const cutoff = nowMs - days * 24 * 60 * 60 * 1000;
 	return records.filter((record) => record.timestampMs >= cutoff);
+}
+
+/** Unassigned Copilot overhead: records with no task ID, grouped by kind. */
+export function rollupUnassignedOverhead(records: readonly UsageRequestRecord[]): OverheadRollup {
+	const scratch = emptyTotals();
+	const byKind: Record<string, RequestTotals> = {};
+	for (const record of records) {
+		if (record.taskId) {
+			continue;
+		}
+		addRecord(scratch, record);
+		const kindTotals = byKind[record.requestKind] ?? emptyTotals();
+		addRecord(kindTotals, record);
+		byKind[record.requestKind] = kindTotals;
+	}
+	const finalizedByKind: Record<string, RequestTotals> = {};
+	for (const [kind, kindTotals] of Object.entries(byKind)) {
+		finalizedByKind[kind] = finalize(kindTotals);
+	}
+	return { ...finalize(scratch), byKind: finalizedByKind };
 }

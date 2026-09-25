@@ -4,6 +4,7 @@ import { t } from '../i18n';
 import { logger } from '../logger';
 import { ensureRequestDumpRoot } from '../provider/debug';
 import type { UsageDashboard } from '../usage/dashboard';
+import type { UsageService } from '../usage/recorder';
 import type { UsageStatusBar } from '../usage/status';
 import type { UsageStore } from '../usage/storage';
 import { toCsvText } from '../usage/csv';
@@ -11,6 +12,7 @@ import { toCsvText } from '../usage/csv';
 export function registerCommands(
 	context: vscode.ExtensionContext,
 	deps?: { dashboard?: UsageDashboard; statusBar?: UsageStatusBar; store?: UsageStore },
+	getUsageService?: () => UsageService | undefined,
 ): void {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('meta-spark.showLogs', () => logger.show()),
@@ -27,7 +29,9 @@ export function registerCommands(
 			openUsageDashboard(deps),
 		),
 		vscode.commands.registerCommand('meta-spark.exportUsageCsv', () => exportUsageCsv(deps)),
-		vscode.commands.registerCommand('meta-spark.clearUsageHistory', () => clearUsageHistory(deps)),
+		vscode.commands.registerCommand('meta-spark.clearUsageHistory', () =>
+			clearUsageHistory(deps, getUsageService),
+		),
 	);
 }
 
@@ -73,11 +77,14 @@ async function exportUsageCsv(deps?: { store?: UsageStore }): Promise<void> {
 	}
 }
 
-async function clearUsageHistory(deps?: {
-	store?: UsageStore;
-	dashboard?: UsageDashboard;
-	statusBar?: UsageStatusBar;
-}): Promise<void> {
+async function clearUsageHistory(
+	deps?: {
+		store?: UsageStore;
+		dashboard?: UsageDashboard;
+		statusBar?: UsageStatusBar;
+	},
+	getUsageService?: () => UsageService | undefined,
+): Promise<void> {
 	try {
 		if (!deps?.store) {
 			void vscode.window.showWarningMessage(t('usage.dashboard.unavailable'));
@@ -91,7 +98,15 @@ async function clearUsageHistory(deps?: {
 		if (confirmed !== t('usage.clear.confirmYes')) {
 			return;
 		}
-		await deps.store.clear();
+		// Route through the service so the in-memory contexts cache is
+		// dropped with storage; otherwise a later request could resurrect
+		// cleared chat/task metadata.
+		const service = getUsageService?.();
+		if (service) {
+			await service.clearAll();
+		} else {
+			await deps.store.clear();
+		}
 		await deps.dashboard?.refresh();
 		await deps.statusBar?.refresh();
 		void vscode.window.showInformationMessage(t('usage.clear.done'));

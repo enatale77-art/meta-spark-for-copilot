@@ -1,5 +1,11 @@
 import vscode from 'vscode';
-import { aggregateRequests, filterByTime, rollupChats, rollupTasks } from './aggregate';
+import {
+	aggregateRequests,
+	filterByTime,
+	rollupChats,
+	rollupTasks,
+	rollupUnassignedOverhead,
+} from './aggregate';
 import { toCsvText } from './csv';
 import { t } from '../i18n';
 import { logger } from '../logger';
@@ -23,8 +29,12 @@ export class UsageDashboard {
 	constructor(
 		private readonly context: vscode.ExtensionContext,
 		private readonly store: UsageStore,
-		private readonly onCleared?: () => void,
+		private onCleared?: () => void | Promise<void>,
 	) {}
+
+	setOnCleared(onCleared: () => void | Promise<void>): void {
+		this.onCleared = onCleared;
+	}
 
 	async open(): Promise<void> {
 		if (this.panel) {
@@ -151,8 +161,13 @@ export class UsageDashboard {
 		if (confirmed !== t('usage.clear.confirmYes')) {
 			return;
 		}
-		await this.store.clear();
-		this.onCleared?.();
+		// The lifecycle onCleared hook routes through UsageService.clearAll()
+		// so storage deletion and contexts-cache invalidation stay together.
+		if (this.onCleared) {
+			await this.onCleared();
+		} else {
+			await this.store.clear();
+		}
 		await this.refresh();
 		void vscode.window.showInformationMessage(t('usage.clear.done'));
 	}
@@ -214,6 +229,7 @@ export class UsageDashboard {
 					.filter((record) => record.taskId === selectedTask.taskId)
 					.sort((a, b) => a.timestampMs - b.timestampMs)
 			: [];
+		const overhead = rollupUnassignedOverhead(records);
 
 		return [
 			'<!DOCTYPE html><html><head><meta charset="utf-8">',
@@ -279,6 +295,8 @@ export class UsageDashboard {
 						`<th>${escapeHtml(t('usage.dashboard.task'))}</th>`,
 						`<th>${escapeHtml(t('usage.dashboard.project'))}</th>`,
 						`<th>${escapeHtml(t('usage.dashboard.chat'))}</th>`,
+						`<th>${escapeHtml(t('usage.dashboard.start'))}</th>`,
+						`<th>${escapeHtml(t('usage.dashboard.lastActivity'))}</th>`,
 						`<th>${escapeHtml(t('usage.dashboard.requests'))}</th>`,
 						`<th>${escapeHtml(t('usage.dashboard.input'))}</th>`,
 						`<th>${escapeHtml(t('usage.dashboard.cached'))}</th>`,
@@ -292,6 +310,8 @@ export class UsageDashboard {
 								`<tr><td><a href="#" data-task="${escapeHtml(task.taskId)}">${escapeHtml(task.preview || task.taskId.slice(0, 8))}</a><br><code>${escapeHtml(task.taskId)}</code></td>` +
 								`<td>${escapeHtml(task.projectName)}</td>` +
 								`<td>${escapeHtml(chatLabel(task.chatId, contexts))}<br><code>${escapeHtml(task.chatId ?? '')}</code></td>` +
+								`<td>${escapeHtml(formatDateTime(task.firstSeenMs))}</td>` +
+								`<td>${escapeHtml(formatDateTime(task.lastSeenMs))}</td>` +
 								`<td>${task.requests}</td><td>${formatNumber(task.inputTokens)}</td><td>${formatNumber(task.cachedTokens)}</td>` +
 								`<td>${task.cacheHitPct.toFixed(1)}%</td><td>${formatNumber(task.outputTokens)}</td>` +
 								`<td>${formatNumber(task.reasoningTokens)}</td><td>${formatCost(task.estimatedCostUsd)}</td></tr>`,
@@ -302,11 +322,23 @@ export class UsageDashboard {
 				? [
 						`<h3>${escapeHtml(t('usage.dashboard.taskDetail'))}: ${escapeHtml(selectedTask.preview || selectedTask.taskId)}</h3>`,
 						`<p class="note">task_id <code>${escapeHtml(selectedTask.taskId)}</code> <button data-copy="${escapeHtml(selectedTask.taskId)}">${escapeHtml(t('usage.dashboard.copy'))}</button> · chat_id <code>${escapeHtml(selectedTask.chatId ?? '')}</code> <button data-copy="${escapeHtml(selectedTask.chatId ?? '')}">${escapeHtml(t('usage.dashboard.copy'))}</button></p>`,
-						`<p class="note">${escapeHtml(t('usage.dashboard.kindBreakdown'))}: ${escapeHtml(
-							Object.entries(selectedTask.byKind)
-								.map(([kind, kindTotals]) => `${kind} ×${kindTotals.requests}`)
-								.join(', ') || '—',
-						)}</p>`,
+						`<p class="note">${escapeHtml(t('usage.dashboard.kindBreakdown'))}</p>`,
+						'<table><thead><tr>',
+						`<th>${escapeHtml(t('usage.dashboard.kind'))}</th><th>${escapeHtml(t('usage.dashboard.requests'))}</th>`,
+						`<th>${escapeHtml(t('usage.dashboard.input'))}</th><th>${escapeHtml(t('usage.dashboard.cached'))}</th>`,
+						`<th>${escapeHtml(t('usage.dashboard.cacheHit'))}</th><th>${escapeHtml(t('usage.dashboard.output'))}</th>`,
+						`<th>${escapeHtml(t('usage.dashboard.reasoning'))}</th><th>${escapeHtml(t('usage.dashboard.cost'))}</th>`,
+						'</tr></thead><tbody>',
+						...Object.entries(selectedTask.byKind)
+							.sort((a, b) => b[1].requests - a[1].requests)
+							.map(
+								([kind, kindTotals]) =>
+									`<tr><td>${escapeHtml(kind)}</td><td>${kindTotals.requests}</td>` +
+									`<td>${formatNumber(kindTotals.inputTokens)}</td><td>${formatNumber(kindTotals.cachedTokens)}</td>` +
+									`<td>${kindTotals.cacheHitPct.toFixed(1)}%</td><td>${formatNumber(kindTotals.outputTokens)}</td>` +
+									`<td>${formatNumber(kindTotals.reasoningTokens)}</td><td>${formatCost(kindTotals.estimatedCostUsd)}</td></tr>`,
+							),
+						'</tbody></table>',
 						'<table><thead><tr>',
 						`<th>${escapeHtml(t('usage.dashboard.time'))}</th><th>${escapeHtml(t('usage.dashboard.kind'))}</th>`,
 						`<th>${escapeHtml(t('usage.dashboard.input'))}</th><th>${escapeHtml(t('usage.dashboard.cached'))}</th>`,
@@ -336,6 +368,28 @@ export class UsageDashboard {
 								`<tr><td>${escapeHtml(chat.displayName)}<br><code>${escapeHtml(chat.chatId)}</code></td>` +
 								`<td>${chat.taskCount}</td><td>${chat.requests}</td><td>${formatCost(chat.estimatedCostUsd)}</td></tr>`,
 						),
+						'</tbody></table>',
+					].join(''),
+			`<h3>${escapeHtml(t('usage.dashboard.overhead'))} (${overhead.requests})</h3>`,
+			overhead.requests === 0
+				? `<p class="note">${escapeHtml(t('usage.dashboard.emptyOverhead'))}</p>`
+				: [
+						`<p class="note">${escapeHtml(t('usage.dashboard.overheadNote'))}</p>`,
+						'<table><thead><tr>',
+						`<th>${escapeHtml(t('usage.dashboard.kind'))}</th><th>${escapeHtml(t('usage.dashboard.requests'))}</th>`,
+						`<th>${escapeHtml(t('usage.dashboard.input'))}</th><th>${escapeHtml(t('usage.dashboard.cached'))}</th>`,
+						`<th>${escapeHtml(t('usage.dashboard.cacheHit'))}</th><th>${escapeHtml(t('usage.dashboard.output'))}</th>`,
+						`<th>${escapeHtml(t('usage.dashboard.reasoning'))}</th><th>${escapeHtml(t('usage.dashboard.cost'))}</th>`,
+						'</tr></thead><tbody>',
+						...Object.entries(overhead.byKind)
+							.sort((a, b) => b[1].requests - a[1].requests)
+							.map(
+								([kind, kindTotals]) =>
+									`<tr><td>${escapeHtml(kind)}</td><td>${kindTotals.requests}</td>` +
+									`<td>${formatNumber(kindTotals.inputTokens)}</td><td>${formatNumber(kindTotals.cachedTokens)}</td>` +
+									`<td>${kindTotals.cacheHitPct.toFixed(1)}%</td><td>${formatNumber(kindTotals.outputTokens)}</td>` +
+									`<td>${formatNumber(kindTotals.reasoningTokens)}</td><td>${formatCost(kindTotals.estimatedCostUsd)}</td></tr>`,
+							),
 						'</tbody></table>',
 					].join(''),
 			`<p class="note">${escapeHtml(t('usage.dashboard.localChatNote'))}</p>`,
@@ -394,6 +448,14 @@ function formatNumber(value: number): string {
 
 function formatNullable(value: number | null): string {
 	return value === null || value === undefined ? '—' : formatNumber(value);
+}
+
+function formatDateTime(valueMs: number): string {
+	try {
+		return new Date(valueMs).toLocaleString();
+	} catch {
+		return '—';
+	}
 }
 
 function formatCost(value: number | null | undefined): string {

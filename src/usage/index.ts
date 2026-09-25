@@ -8,3 +8,4 @@ export { USAGE_MARKER_MIME } from './marker';
 export { UsageService, toCorrelationMessages, type PendingUsageRequest } from './recorder';
 export { UsageDashboard } from './dashboard';
 export { UsageStatusBar } from './status';
+export { selectStatusTask, type StatusSelection } from './statusSelection';

@@ -34,8 +34,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		},
 	});
 	activeStatusBar = new UsageStatusBar(store, () => activeDashboard?.open());
+	activeDashboard.setOnCleared(async () => {
+		try {
+			await usageService.clearAll();
+		} catch (error) {
+			logger.warn('[usage] Dashboard clear failed', error);
+			throw error;
+		}
+	});
 	context.subscriptions.push(activeDashboard, activeStatusBar);
-	registerCommands(context, { dashboard: activeDashboard, statusBar: activeStatusBar, store });
+	registerCommands(
+		context,
+		{ dashboard: activeDashboard, statusBar: activeStatusBar, store },
+		() => usageService,
+	);
 	registerActionUrls(context);
 
 	try {

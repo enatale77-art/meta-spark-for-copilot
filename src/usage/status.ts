@@ -1,8 +1,9 @@
 import vscode from 'vscode';
-import { aggregateRequests, filterByTime } from './aggregate';
+import { aggregateRequests } from './aggregate';
 import { t } from '../i18n';
 import { getUsageStatusBarEnabled } from '../config';
 import type { UsageStore } from './storage';
+import { selectStatusTask } from './statusSelection';
 
 const STATUS_BAR_PRIORITY = 90;
 
@@ -33,23 +34,20 @@ export class UsageStatusBar {
 				return;
 			}
 			const ledger = await this.store.readRequests();
-			const recent = filterByTime(ledger.records, Date.now(), 30)
-				.filter((record) => record.status === 'completed')
-				.sort((a, b) => b.timestampMs - a.timestampMs);
-			const projectIds = new Set(
-				(vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.toString()),
+			const workspaceUris = (vscode.workspace.workspaceFolders ?? []).map((folder) =>
+				folder.uri.toString(),
 			);
-			void projectIds;
-			const latest = recent[0];
+			const { latest, taskRecords } = selectStatusTask({
+				records: ledger.records,
+				workspaceUris,
+				nowMs: Date.now(),
+			});
 			if (!latest) {
 				this.item.text = t('usage.status.empty');
 				this.item.tooltip = t('usage.status.emptyTooltip');
 				this.item.show();
 				return;
 			}
-			const taskRecords = recent.filter(
-				(record) => record.taskId && latest.taskId && record.taskId === latest.taskId,
-			);
 			const totals = aggregateRequests(taskRecords.length > 0 ? taskRecords : [latest]);
 			this.item.text = t(
 				'usage.status.text',

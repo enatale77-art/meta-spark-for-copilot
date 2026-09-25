@@ -63,7 +63,6 @@ export function allocateUsageContext(input: {
 	const latestValid = latestMarker?.valid === true ? latestMarker : undefined;
 	const newSubstantiveTurn = hasNewSubstantiveTurnAfterMarker(input.messages);
 	const isMainAgent = input.requestKind === 'main-agent';
-	const isUtilityKind = isUtilityRequestKind(input.requestKind);
 
 	if (isMainAgent) {
 		if (!latestValid?.chatId || !latestValid?.taskId) {
@@ -104,9 +103,12 @@ export function allocateUsageContext(input: {
 		};
 	}
 
-	// Non-main/utility requests: only inherit when a valid marker is present.
-	// Never guess across chats; otherwise land in unassigned Copilot overhead.
-	if (latestValid?.chatId && latestValid?.taskId && !isUtilityKind) {
+	// Every non-main request with a valid marker inherits that existing task,
+	// including known utility/background kinds — that is the Copilot
+	// orchestration overhead the monitor is meant to attribute per task.
+	// Utilities never create tasks; without valid marker evidence they remain
+	// unassigned overhead rather than guessed into a chat.
+	if (latestValid?.chatId && latestValid?.taskId) {
 		return {
 			...base,
 			chatId: latestValid.chatId,
@@ -119,9 +121,9 @@ export function allocateUsageContext(input: {
 		};
 	}
 	// Some utility requests still carry the marker; inherit the *chat* context
-	// without claiming task membership? No — WP says record as unassigned
-	// overhead when correlation is absent, and utilities must not create tasks.
-	// Inherit only for non-utility background that shares history.
+	// without claiming task membership? No — utilities inherit the full
+	// task above when marker evidence exists, and land here only when it is
+	// absent. Never guess across chats.
 	return {
 		...base,
 		chatId: UNASSIGNED_CHAT_ID,
