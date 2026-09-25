@@ -5,7 +5,6 @@ import { MODELS } from '../consts';
 import { t } from '../i18n';
 import { logger } from '../logger';
 import type { UsageService, PendingUsageRequest } from '../usage';
-import { createUsageMarkerPart } from '../usage/marker';
 import { getConfiguredThinkingEffort } from './models';
 import { createCacheDiagnosticsRecorder, dumpProviderInput } from './debug';
 import { toChatInfo } from './models';
@@ -172,6 +171,7 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 				token,
 				cacheDiagnostics: this.cacheDiagnostics,
 				getVisionDescriber: () => this.vision.get(),
+				usageCorrelation: resolveUsageCorrelation(usagePending),
 			});
 		} catch (error) {
 			await this.recordUsageAttempt(usagePending, error);
@@ -253,7 +253,6 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 	):
 		| {
 				onUsage: (usage: import('../types').MetaUsage, info: { durationMs?: number }) => void;
-				usageMarker: unknown;
 		  }
 		| undefined {
 		if (!usagePending || !this.usageService) {
@@ -271,23 +270,6 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 					.recordCompleted(state.pending, { usage, durationMs: info.durationMs })
 					.catch((error) => logger.warn('[usage] Failed to record Muse usage', error));
 			},
-			usageMarker: (() => {
-				const { chatId, taskId } = state.pending.allocation;
-				if (!chatId || !taskId) {
-					return undefined;
-				}
-				// Only the main-agent response carries the marker so tool loops
-				// can return it; background/utility responses stay unmarked.
-				if (state.pending.requestKind !== 'main-agent') {
-					return undefined;
-				}
-				try {
-					return createUsageMarkerPart(chatId, taskId);
-				} catch (error) {
-					logger.warn('[usage] Failed to create usage marker', error);
-					return undefined;
-				}
-			})(),
 		};
 	}
 
@@ -313,4 +295,23 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 function joinInitialResponseNotices(...notices: (string | undefined)[]): string | undefined {
 	const joined = notices.filter((notice) => notice && notice.trim().length > 0).join('\n');
 	return joined || undefined;
+}
+
+/**
+ * R7: exactly one stateful marker per main-agent response carries usage
+ * correlation. Non-main responses stay unmarked; unassigned requests carry
+ * no IDs. Uses the VS Code selected model ID as the Agent Host prefix —
+ * never the API model override.
+ */
+function resolveUsageCorrelation(
+	usagePending: { pending: PendingUsageRequest; settled: boolean } | undefined,
+): { chatId: string; taskId: string } | undefined {
+	const allocation = usagePending?.pending.allocation;
+	if (!allocation?.chatId || !allocation?.taskId) {
+		return undefined;
+	}
+	if (usagePending?.pending.requestKind !== 'main-agent') {
+		return undefined;
+	}
+	return { chatId: allocation.chatId, taskId: allocation.taskId };
 }

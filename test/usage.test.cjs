@@ -21,7 +21,29 @@ const {
 	parseMarkerPayload,
 	buildMarkerPayload,
 	serializeMarkerPayload,
+	sanitizePromptText,
 } = require('../out/usage/context.js');
+const {
+	usageSignatureChanged,
+	shouldRefreshSignature,
+} = (() => {
+	const Module = require('node:module');
+	const { join } = require('node:path');
+	const stubPath = join(__dirname, 'vscode-stub.cjs');
+	const originalResolve = Module._resolveFilename;
+	Module._resolveFilename = function (request, ...rest) {
+		if (request === 'vscode') {
+			return stubPath;
+		}
+		return originalResolve.call(this, request, ...rest);
+	};
+	try {
+		return require('../out/usage/dashboard.js');
+	} finally {
+		Module._resolveFilename = originalResolve;
+	}
+})();
+const { signatureFromLedger } = require('../out/usage/storage.js');
 const { escapeCsvField, toCsvText } = require('../out/usage/csv.js');
 const { calculateCost, resolvePricing, splitUsageTokens } = require('../out/usage/pricing.js');
 const {
@@ -350,6 +372,43 @@ describe('project identity and previews', () => {
 		const long = normalizePreview('x'.repeat(500));
 		assert.equal(long.length, 160);
 	});
+
+	it('sanitizer strips Copilot scaffolding blocks', () => {
+		const text =
+			'<context>repo files</context><reminder>nudge</reminder><system-reminder>rule</system-reminder>' +
+			'<attachments>files</attachments><current_datetime>today</current_datetime><pr_metadata foo="1"/>';
+		assert.equal(sanitizePromptText(text).trim(), '');
+	});
+
+	it('sanitizer unwraps userRequest/user_query wrappers', () => {
+		assert.equal(
+			normalizePreview('<context>ctx</context><userRequest>Fix the tests</userRequest>'),
+			'Fix the tests',
+		);
+		assert.equal(
+			normalizePreview('<user_query>Fix the tests</user_query>'),
+			'Fix the tests',
+		);
+	});
+
+	it('context-only Copilot message after a marker is not a new task', () => {
+		const chatId = randomUUID();
+		const taskId = randomUUID();
+		const marker = { valid: true, chatId, taskId, version: 1, writer: 'meta-spark-for-copilot' };
+		const allocation = allocateUsageContext({
+			messages: [
+				userText('Fix it'),
+				markerHolder(chatId, taskId),
+				userText('<context>repo state</context><reminder>nudge</reminder>'),
+			],
+			requestKind: 'main-agent',
+			marker,
+			projectId: 'project-1',
+			projectName: 'Demo',
+		});
+		assert.equal(allocation.taskId, taskId);
+		assert.equal(allocation.isNewTask, false);
+	});
 });
 
 describe('persistence', () => {
@@ -664,5 +723,158 @@ describe('synthetic provider-level sequence', () => {
 		assert.equal(tasks.reduce((sum, task) => sum + task.requests, 0), 3);
 		const csvLines = toCsvText(ledger).split('\r\n').filter(Boolean);
 		assert.equal(csvLines.length, ledger.length + 1);
+	});
+});
+
+describe('unified stateful marker (R7)', () => {
+	function statefulBytes(prefix, payloadObject) {
+		const json = JSON.stringify(payloadObject);
+		const encoded = Buffer.from(json, 'utf8').toString('base64url');
+		return new TextEncoder().encode(`${prefix}\\json:${encoded}`);
+	}
+
+	function loadStatefulParser() {
+		const Module = require('node:module');
+		const { join } = require('node:path');
+		const stubPath = join(__dirname, 'vscode-stub.cjs');
+		const originalResolve = Module._resolveFilename;
+		Module._resolveFilename = function (request, ...rest) {
+			if (request === 'vscode') {
+				return stubPath;
+			}
+			return originalResolve.call(this, request, ...rest);
+		};
+		try {
+			return require('../out/usage/marker.js');
+		} finally {
+			Module._resolveFilename = originalResolve;
+		}
+	}
+
+	function loadReplay() {
+		const Module = require('node:module');
+		const { join } = require('node:path');
+		const stubPath = join(__dirname, 'vscode-stub.cjs');
+		const originalResolve = Module._resolveFilename;
+		Module._resolveFilename = function (request, ...rest) {
+			if (request === 'vscode') {
+				return stubPath;
+			}
+			return originalResolve.call(this, request, ...rest);
+		};
+		try {
+			return require('../out/provider/replay/markers.js');
+		} finally {
+			Module._resolveFilename = originalResolve;
+		}
+	}
+
+	it('agent host round trip preserves chat/task ids through stateful marker', () => {
+		const marker = loadStatefulParser();
+		const chatId = randomUUID();
+		const taskId = randomUUID();
+		const modelId = 'muse-spark-1.3-contributor';
+		const bytes = statefulBytes(modelId, {
+			usage: { version: 1, writer: 'meta-spark-for-copilot', chatId, taskId },
+		});
+		// Simulate the bridge extracting the response id and rebuilding the
+		// next request marker with the same model prefix.
+		const decoded = new TextDecoder().decode(bytes);
+		const responseId = decoded.slice(decoded.indexOf('\\') + 1);
+		const rebuilt = new TextEncoder().encode(`${modelId}\\${responseId}`);
+		const parsed = marker.parseStatefulUsageMarkerPart({ mimeType: 'stateful_marker', data: rebuilt });
+		assert.equal(parsed?.valid, true);
+		assert.equal(parsed?.chatId, chatId.toLowerCase());
+		assert.equal(parsed?.taskId, taskId.toLowerCase());
+	});
+
+	it('standard and contributor model ids are accepted as prefixes', () => {
+		const replay = loadReplay();
+		const chatId = randomUUID();
+		const taskId = randomUUID();
+		for (const modelId of ['muse-spark-1.3', 'muse-spark-1.3-contributor']) {
+			const bytes = statefulBytes(modelId, {
+				reasoning: { text: 'think' },
+				usage: { version: 1, writer: 'meta-spark-for-copilot', chatId, taskId },
+			});
+			const parsed = replay.parseReplayMarkerData(bytes);
+			assert.equal(parsed.valid, true);
+			assert.equal(parsed.usageChatId, chatId.toLowerCase());
+			assert.equal(parsed.usageTaskId, taskId.toLowerCase());
+			assert.equal(parsed.reasoningText, 'think');
+		}
+	});
+
+	it('legacy meta-spark prefix and raw payloads remain parseable', () => {
+		const replay = loadReplay();
+		const legacy = statefulBytes('meta-spark', { reasoning: { text: 'think' } });
+		const parsed = replay.parseReplayMarkerData(legacy);
+		assert.equal(parsed.valid, true);
+		assert.equal(parsed.reasoningText, 'think');
+		assert.equal(parsed.usageChatId, undefined);
+	});
+
+	it('unified marker preserves reasoning replay and usage ids together', () => {
+		const replay = loadReplay();
+		const chatId = randomUUID();
+		const taskId = randomUUID();
+		const bytes = statefulBytes('muse-spark-1.3', {
+			vision: { text: 'v' },
+			reasoning: { text: 'r' },
+			usage: { version: 1, writer: 'meta-spark-for-copilot', chatId, taskId },
+		});
+		const parsed = replay.parseReplayMarkerData(bytes);
+		assert.equal(parsed.valid, true);
+		assert.equal(parsed.visionText, 'v');
+		assert.equal(parsed.reasoningText, 'r');
+		assert.equal(parsed.usageChatId, chatId.toLowerCase());
+		assert.equal(parsed.usageTaskId, taskId.toLowerCase());
+	});
+
+	it('no meta-spark-usage-context marker is emitted by the provider path', () => {
+		const fs = require('node:fs');
+		const path = require('node:path');
+		const providerIndex = fs.readFileSync(path.join(__dirname, '..', 'src', 'provider', 'index.ts'), 'utf8');
+		const stream = fs.readFileSync(path.join(__dirname, '..', 'src', 'provider', 'stream.ts'), 'utf8');
+		assert.ok(!providerIndex.includes('createUsageMarkerPart'));
+		assert.ok(!providerIndex.includes('meta-spark-usage-context'));
+		assert.ok(!stream.includes('usageMarker'));
+		assert.ok(!stream.includes('meta-spark-usage-context'));
+	});
+
+	it('two prompts in one stateful chain make one chat with two tasks; tool loop stays put', () => {
+		const chatId = randomUUID();
+		const firstTask = randomUUID();
+		const marker = { valid: true, chatId, taskId: firstTask, version: 1, writer: 'meta-spark-for-copilot' };
+		const loop = allocateUsageContext({
+			messages: [userText('First'), markerHolder(chatId, firstTask), toolOnly()],
+			requestKind: 'main-agent',
+			marker,
+			projectId: 'project-1',
+			projectName: 'Demo',
+		});
+		assert.equal(loop.taskId, firstTask);
+		const second = allocateUsageContext({
+			messages: [userText('First'), markerHolder(chatId, firstTask), userText('Second prompt')],
+			requestKind: 'main-agent',
+			marker,
+			projectId: 'project-1',
+			projectName: 'Demo',
+		});
+		assert.equal(second.chatId, chatId);
+		assert.notEqual(second.taskId, firstTask);
+	});
+});
+
+describe('cross-window sync signatures (R10)', () => {
+	it('signature changes when the ledger grows and debounce gates refresh', () => {
+		const before = signatureFromLedger([], emptyContexts());
+		const after = signatureFromLedger([makeRecord({})], emptyContexts());
+		assert.equal(usageSignatureChanged(undefined, after), true);
+		assert.equal(usageSignatureChanged(before, before), false);
+		assert.equal(usageSignatureChanged(before, after), true);
+		assert.equal(shouldRefreshSignature(before, after, 0, 1000, 1500), false);
+		assert.equal(shouldRefreshSignature(before, after, 0, 2000, 1500), true);
+		assert.equal(shouldRefreshSignature(after, after, 0, 5000, 1500), false);
 	});
 });

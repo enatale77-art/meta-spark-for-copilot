@@ -119,6 +119,8 @@ const zh: Translations = {
 	'usage.dashboard.emptyOverhead': '该视图暂无未归组开销。',
 	'usage.dashboard.overheadNote': '以下请求没有有效的任务关联证据，已计入总览但未归入任何任务。',
 	'usage.dashboard.copy': '复制',
+	'usage.dashboard.expand': '点击展开详情',
+	'usage.dashboard.collapse': '收起',
 	'usage.dashboard.empty': '该视图暂无用量记录。请用 Muse Spark 运行一次 Copilot 任务。',
 	'usage.dashboard.emptyChats': '该视图暂无本地会话。',
 	'usage.dashboard.localChatNote':
@@ -363,6 +365,8 @@ const en: Translations = {
 	'usage.dashboard.overheadNote':
 		'These requests had no valid task evidence; they count toward totals but belong to no task.',
 	'usage.dashboard.copy': 'Copy',
+	'usage.dashboard.expand': 'Select to expand details',
+	'usage.dashboard.collapse': 'Collapse',
 	'usage.dashboard.empty': 'No usage records in this view yet. Run a Copilot task with Muse Spark.',
 	'usage.dashboard.emptyChats': 'No local chats in this view yet.',
 	'usage.dashboard.localChatNote':

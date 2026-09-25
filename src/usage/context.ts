@@ -184,7 +184,7 @@ export function isSubstantiveHumanTurn(msg: CorrelationMessage): boolean {
 	if (msg.hasTerminalNotification || msg.hasControlUpdate) {
 		return false;
 	}
-	return msg.text.trim().length > 0;
+	return sanitizePromptText(msg.text).trim().length > 0;
 }
 
 export function isTerminalNotificationText(text: string): boolean {
@@ -196,11 +196,50 @@ export function isControlUpdateText(text: string): boolean {
 }
 
 export function normalizePreview(text: string): string {
-	const collapsed = text.replace(/\s+/g, ' ').trim();
+	const collapsed = sanitizePromptText(text).replace(/\s+/g, ' ').trim();
 	if (collapsed.length <= PROMPT_PREVIEW_MAX_CHARS) {
 		return collapsed;
 	}
 	return collapsed.slice(0, PROMPT_PREVIEW_MAX_CHARS);
+}
+
+/**
+ * R8: strip Copilot-injected prompt scaffolding before task detection and
+ * preview generation. Removes generated blocks (reminder, attachments,
+ * context, current_datetime, pr_metadata) and unwraps userRequest/user_query
+ * wrappers so the dashboard shows the real human prompt. A message that
+ * reduces to scaffolding only yields an empty string and is never a
+ * substantive human turn.
+ */
+export function sanitizePromptText(text: string): string {
+	if (!text) {
+		return '';
+	}
+	let cleaned = text;
+	cleaned = cleaned.replace(/<reminder>[\s\S]*?<\/reminder>/gi, ' ');
+	cleaned = cleaned.replace(/<system[-_]reminder>[\s\S]*?<\/system[-_]reminder>/gi, ' ');
+	cleaned = cleaned.replace(/<attachments>[\s\S]*?<\/attachments>/gi, ' ');
+	cleaned = cleaned.replace(/<context>[\s\S]*?<\/context>/gi, ' ');
+	cleaned = cleaned.replace(/<current_datetime>[\s\S]*?<\/current_datetime>/gi, ' ');
+	cleaned = cleaned.replace(/<pr_metadata\b[^>]*\/>/gi, ' ');
+	const unwrapped = unwrapUserPrompt(cleaned);
+	cleaned = unwrapped ?? cleaned;
+	return cleaned.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+}
+
+function unwrapUserPrompt(text: string): string | undefined {
+	const wrappers = ['userRequest', 'user_query'] as const;
+	let current = text;
+	let changed = false;
+	for (const tag of wrappers) {
+		const pattern = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'gi');
+		const without = current.replace(pattern, (_match, inner: string) => {
+			changed = true;
+			return ` ${inner} `;
+		});
+		current = without;
+	}
+	return changed ? current : undefined;
 }
 
 function firstTaskPreview(messages: readonly CorrelationMessage[]): string {
@@ -211,7 +250,7 @@ function latestHumanPreview(messages: readonly CorrelationMessage[]): string {
 	for (let i = messages.length - 1; i >= 0; i -= 1) {
 		const msg = messages[i];
 		if (isSubstantiveHumanTurn(msg)) {
-			return normalizePreview(msg.text);
+			return normalizePreview(sanitizePromptText(msg.text));
 		}
 	}
 	return '';

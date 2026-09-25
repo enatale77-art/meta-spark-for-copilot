@@ -20,7 +20,6 @@ interface ResponseStreamState {
 	emittedToolCallIds: string[];
 	initialResponseNoticeReported: boolean;
 	replayMarkerReported: boolean;
-	usageMarkerReported: boolean;
 }
 
 const COPILOT_USAGE_DATA_PART_MIME = 'usage';
@@ -34,7 +33,6 @@ export interface StreamChatCompletionOptions {
 	setCharsPerToken: (charsPerToken: number) => void;
 	usageHooks?: {
 		onUsage?: (usage: MetaUsage, info: { durationMs: number }) => void;
-		usageMarker?: unknown;
 	};
 }
 
@@ -52,7 +50,6 @@ export function streamChatCompletion({
 		emittedToolCallIds: [],
 		initialResponseNoticeReported: false,
 		replayMarkerReported: false,
-		usageMarkerReported: false,
 	};
 	const streamStartedAtMs = Date.now();
 	const cancelListener = observeCancellationToken(token, prepared.cacheDiagnostics);
@@ -83,7 +80,6 @@ export function streamChatCompletion({
 
 				onDone: () => {
 					reportReplayMarkerOnce(prepared, progress, state, 'done');
-					reportUsageMarkerOnce(progress, state, usageHooks?.usageMarker);
 					finalizeReplayDiagnostics(
 						prepared.trailingToolResultIds,
 						state,
@@ -156,22 +152,6 @@ function reportReplayMarkerOnce(
 	reportReplayMarker(prepared, progress, state, trigger);
 }
 
-function reportUsageMarkerOnce(
-	progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-	state: ResponseStreamState,
-	marker: unknown,
-): void {
-	if (state.usageMarkerReported || !marker) {
-		return;
-	}
-	state.usageMarkerReported = true;
-	try {
-		progress.report(marker as vscode.LanguageModelResponsePart);
-	} catch (error) {
-		logger.warn('[usage] Failed to report usage marker', error);
-	}
-}
-
 function reportSkippedReplayMarkerIfNeeded(
 	prepared: PreparedChatRequest,
 	state: ResponseStreamState,
@@ -210,7 +190,7 @@ function reportReplayMarker(
 	}
 
 	try {
-		const markerPart = createReplayMarkerPart(metadata);
+		const markerPart = createReplayMarkerPart(metadata, prepared.vscodeModelId);
 		progress.report(markerPart);
 		prepared.cacheDiagnostics.onReplayMarkerReport({
 			status: 'reported',
@@ -241,6 +221,14 @@ function getReplayMarkerMetadata(
 	return {
 		...prepared.replayMarkerMetadata,
 		reasoningText: state.accumulatedReasoning || undefined,
+		...(prepared.usageCorrelation?.chatId && prepared.usageCorrelation?.taskId
+			? {
+					usage: {
+						chatId: prepared.usageCorrelation.chatId,
+						taskId: prepared.usageCorrelation.taskId,
+					},
+				}
+			: {}),
 	};
 }
 

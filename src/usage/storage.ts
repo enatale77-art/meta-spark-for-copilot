@@ -101,12 +101,33 @@ export function serializeContexts(contexts: ContextsFile): string {
 	return JSON.stringify({ version: 1, chats: contexts.chats, tasks: contexts.tasks });
 }
 
+export interface UsageChangeSignature {
+	requestBytes: number;
+	contextBytes: number;
+	requestCount: number;
+}
+
+export function signatureFromLedger(
+	records: readonly UsageRequestRecord[],
+	contexts: ContextsFile,
+): UsageChangeSignature {
+	return {
+		requestBytes: records.reduce(
+			(sum, record) => sum + (record.totalTokens ?? 0) + record.timestampMs,
+			records.length,
+		),
+		contextBytes: Object.keys(contexts.chats).length * 100003 + Object.keys(contexts.tasks).length,
+		requestCount: records.length,
+	};
+}
+
 export interface UsageStore {
 	appendRequest(record: UsageRequestRecord): Promise<void>;
 	readRequests(): Promise<ParsedLedger>;
 	readContexts(): Promise<ContextsFile>;
 	writeContexts(contexts: ContextsFile): Promise<void>;
 	clear(): Promise<void>;
+	getChangeSignature?(): Promise<UsageChangeSignature | undefined>;
 }
 
 /** In-memory store for tests and deterministic verification. */
@@ -116,9 +137,11 @@ export function createMemoryUsageStore(): UsageStore & {
 } {
 	let records: UsageRequestRecord[] = [];
 	let contexts: ContextsFile = emptyContexts();
+	let revision = 0;
 	return {
 		async appendRequest(record: UsageRequestRecord): Promise<void> {
 			records.push(record);
+			revision += 1;
 		},
 		async readRequests(): Promise<ParsedLedger> {
 			return { records: [...records], corruptedTailLines: 0, corruptedLines: 0 };
@@ -128,10 +151,15 @@ export function createMemoryUsageStore(): UsageStore & {
 		},
 		async writeContexts(next: ContextsFile): Promise<void> {
 			contexts = structuredClone(next);
+			revision += 1;
 		},
 		async clear(): Promise<void> {
 			records = [];
 			contexts = emptyContexts();
+			revision += 1;
+		},
+		async getChangeSignature(): Promise<UsageChangeSignature | undefined> {
+			return signatureFromLedger(records, contexts);
 		},
 		getRecords(): UsageRequestRecord[] {
 			return [...records];

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { appendFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import vscode from 'vscode';
 import { USAGE_DIR_NAME, CONTEXTS_FILE_NAME, REQUESTS_FILE_NAME } from './storage';
@@ -23,6 +23,7 @@ export interface FileUsageStoreOptions {
 		unlink: (path: string) => Promise<unknown>;
 		rename: (from: string, to: string) => Promise<unknown>;
 		readdir: (path: string) => Promise<string[]>;
+		stat?: (path: string) => Promise<{ size: number; mtimeMs: number }>;
 		isNotFound: (error: unknown) => boolean;
 	};
 }
@@ -130,7 +131,40 @@ export function createFileUsageStore(
 				}
 			});
 		},
+		getChangeSignature(): Promise<
+			{ requestBytes: number; contextBytes: number; requestCount: number } | undefined
+		> {
+			return enqueue(async () => {
+				const requestSig = await statSignature(node, requestsPath);
+				const contextSig = await statSignature(node, contextsPath);
+				if (!requestSig && !contextSig) {
+					return { requestBytes: 0, contextBytes: 0, requestCount: 0 };
+				}
+				return {
+					requestBytes: requestSig ? requestSig.size * 1009 + requestSig.mtimeMs : 0,
+					contextBytes: contextSig ? contextSig.size * 1013 + contextSig.mtimeMs : 0,
+					requestCount: requestSig ? requestSig.size : 0,
+				};
+			});
+		},
 	};
+}
+
+async function statSignature(
+	node: NonNullable<FileUsageStoreOptions['nodeFs']>,
+	path: string,
+): Promise<{ size: number; mtimeMs: number } | undefined> {
+	if (typeof node.stat !== 'function') {
+		return undefined;
+	}
+	try {
+		return await node.stat(path);
+	} catch (error) {
+		if (node.isNotFound(error)) {
+			return undefined;
+		}
+		throw error;
+	}
 }
 
 function randomSuffix(): string {
@@ -163,6 +197,10 @@ function defaultNodeFs(): NonNullable<FileUsageStoreOptions['nodeFs']> {
 		unlink: (path) => rm(path, { force: false }),
 		rename: (from, to) => renameOverwrite(from, to),
 		readdir: (path) => readdir(path),
+		stat: async (path) => {
+			const info = await stat(path);
+			return { size: info.size, mtimeMs: info.mtimeMs };
+		},
 		isNotFound: (error) => (error as NodeJS.ErrnoException)?.code === 'ENOENT',
 	};
 }
@@ -278,7 +316,37 @@ function createVscodeFsStore(globalStorageUri: vscode.Uri): UsageStore {
 				}
 			});
 		},
+		getChangeSignature(): Promise<
+			{ requestBytes: number; contextBytes: number; requestCount: number } | undefined
+		> {
+			return enqueue(async () => {
+				const requestSig = await statVscodeSignature(requestsUri);
+				const contextSig = await statVscodeSignature(contextsUri);
+				if (!requestSig && !contextSig) {
+					return { requestBytes: 0, contextBytes: 0, requestCount: 0 };
+				}
+				return {
+					requestBytes: requestSig ? requestSig.size * 1009 + requestSig.mtime : 0,
+					contextBytes: contextSig ? contextSig.size * 1013 + contextSig.mtime : 0,
+					requestCount: requestSig ? requestSig.size : 0,
+				};
+			});
+		},
 	};
+}
+
+async function statVscodeSignature(
+	uri: vscode.Uri,
+): Promise<{ size: number; mtime: number } | undefined> {
+	try {
+		const info = await vscode.workspace.fs.stat(uri);
+		return { size: info.size, mtime: info.mtime };
+	} catch (error) {
+		if ((error as vscode.FileSystemError)?.code === 'FileNotFound') {
+			return undefined;
+		}
+		throw error;
+	}
 }
 
 /**

@@ -13,7 +13,7 @@ import {
 	type CorrelationMessage,
 	type UsageMarkerParseResult,
 } from './context';
-import { findLatestUsageMarker, parseUsageMarkerPart } from './marker';
+import { findLatestUsageMarker, parseStatefulUsageMarkerPart } from './marker';
 import { calculateCost, resolvePricing, splitUsageTokens } from './pricing';
 import type { UsageAllocation, UsageRequestRecord } from './types';
 import { emptyContexts, type ContextsFile } from './types';
@@ -403,7 +403,7 @@ function scanMessageMarker(
 		return undefined;
 	}
 	for (const part of message.content) {
-		const parsed = parseUsageMarkerPart(part);
+		const parsed = parseStatefulUsageMarkerPart(part);
 		if (parsed?.valid) {
 			return parsed;
 		}

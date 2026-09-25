@@ -4,7 +4,7 @@
 **Branch:** `wp/0001-muse-usage-monitor`
 **Date:** 2026-09-25
 **Version:** 2.2.0 (additive minor release)
-**Status:** REVIEW REPAIR ACTIVE
+**Status:** COMPLETE - PENDING REVIEW
 
 ## Summary
 
@@ -102,7 +102,7 @@ Metadata/docs:
   generator (strips `marketplace-readme:remove-*` sections; no bash needed).
 - `.vscodeignore` — excludes `test/`, `scripts/`, `ACTIVE.md`,
   `*.code-workspace`, and other non-runtime files from the VSIX.
-- `test/usage.test.cjs` — 29 deterministic `node:test` cases (CommonJS
+- `test/usage.test.cjs` — 39 deterministic `node:test` cases (CommonJS
   against compiled `out/`, `vscode` stubbed for store/service coverage only;
   no editor runtime).
 - `test/vscode-stub.cjs` — minimal `vscode` module stub for deterministic
@@ -111,13 +111,18 @@ Metadata/docs:
 ## Correlation behavior and known limitations
 
 - First substantive `main-agent` request with no valid marker → new UUID
-  `chat_id` + new UUID `task_id`. The marker (`{version, writer, chatId,
-  taskId}` only) is emitted as a hidden `LanguageModelDataPart` in the
-  main-agent assistant response so Copilot tool loops/history return it.
+  `chat_id` + new UUID `task_id`. The correlation (`{version, writer, chatId,
+  taskId}` only) is embedded in the single unified `stateful_marker`
+  response part (prefixed with the exact VS Code selected model ID) so the
+  Agent Host BYOK bridge carries it forward as conversation state.
 - Same task retained across tool continuations and additional inference calls
   while the latest valid marker is current.
 - New substantive human text turn after the latest marker → same `chat_id`,
-  new `task_id`.
+  new `task_id`. Turn detection and previews run on R8-sanitized prompt text
+  (Copilot `<context>`/`<reminder>`/`<attachments>`/`<current_datetime>`/
+  `<pr_metadata/>` blocks stripped; `<userRequest>`/`<user_query>` unwrapped),
+  so scaffolding-only messages never create tasks and previews show the real
+  human prompt.
 - Tool-result-only messages, terminal notifications, customization/control
   updates, and utility/background requests never create a task by themselves.
 - Every non-main request with a valid `chat_id` + `task_id` marker inherits
@@ -131,10 +136,9 @@ Metadata/docs:
   cannot deep-link to the exact native Copilot chat.
 - Nullable `nativeSessionId` fields are preserved on chat/task metadata for a
   future VS Code API; no private Copilot storage is read.
-- Limitation: no Extension Development Host smoke test was run in this
-  session; correlation is covered by deterministic provider-level tests and
-  the synthetic sequence below. Hidden-marker survival across the real
-  Copilot loop remains to be confirmed in a live agent conversation.
+- Repair scope R7–R10 is covered by deterministic tests plus the synthetic
+  sequence. Live Copilot-agent confirmation of hidden-marker survival and
+  the two-window sync observation remain for the live retest.
 
 ## Storage schema / version
 
@@ -241,10 +245,9 @@ No unrelated refactors were made; the global format baseline was left alone.
 ## Follow-up backlog recommendations
 
 - Live-host smoke test: dashboard command, status item, export dialog, clear
-  confirmation, and hidden-marker survival in a real Copilot agent
-  conversation (record limitation closure).
-- Consider a dashboard state-preserving refresh (currently resets filters to
-  30d/all on refresh) and pagination/virtualization if ledgers grow large.
+  confirmation, hidden-marker survival in a real Copilot agent conversation,
+  and the R10 two-window sync observation (record limitation closure).
+- Consider pagination/virtualization if ledgers grow large.
 - Optional: corrupted-ledger surfacing in the dashboard UI (currently logged,
   non-fatal) and a record-count guard for very large histories.
 - Revisit `format` script scope (currently WP-file-scoped) vs. the
@@ -641,3 +644,21 @@ Add/adjust deterministic rendering/aggregation tests where practical, then verif
   5. confirm B retains its chosen filters/expanded-card state;
   6. hide/close B's dashboard and confirm its observer stops/suspends;
   7. reopen and confirm it immediately reconciles to current ledger state.
+
+
+## Live Smoke Repair 01 � disposition (2026-09-25, same branch)
+
+All four findings repaired in scope; revalidation complete.
+
+- **R7 (unified stateful marker):** usage correlation now rides inside the single supported stateful_marker payload (src/provider/replay/markers.ts carries {vision, reasoning, usage:{version, writer, chatId, taskId}}; createReplayMarkerPart(metadata, prefix) prefixes bytes with the exact VS Code selected model ID). src/provider/request.ts threads usageCorrelation through PreparedChatRequest; src/provider/stream.ts merges it into the one emitted marker and no longer emits a second meta-spark-usage-context part. hasReplayMarkerMetadata treats valid usage IDs as sufficient emission reason. src/usage/marker.ts recovers IDs from the reconstructed stateful_marker on the next request (legacy standalone MIME still parsed, never emitted). Backward parsing of legacy meta-spark/model-ID/raw-UUID/replay payloads preserved. No totals, prompts, source, or tool output enter the marker.
+- **R8 (prompt sanitizer):** src/usage/context.ts::sanitizePromptText strips <reminder>, <system-reminder>/<system_reminder>, <attachments>, <context>, <current_datetime>, and self-closing <pr_metadata/>, then unwraps <userRequest>/<user_query> (leading text preferred; wrapper inner text recovered when it holds the only real prompt). isSubstantiveHumanTurn and 
+ormalizePreview operate on sanitized text, so scaffolding-only messages never create tasks and previews show the human prompt (still whitespace-collapsed, 160-char capped).
+- **R9 (card-first dashboard):** src/usage/dashboard.ts renders overall summary cards, collapsed task cards (title, project, req/in/cache-hit/out, cost), collapsed local-chat roll-up cards, and one compact unassigned-overhead card; IDs, timestamps, per-kind tables, and request timelines appear only in expanded detail (task/chat/overhead). Responsive grid with no page-level horizontal scroll; expanded tables scroll locally. Filters, export, and clear preserved; refresh preserves filter/expansion state. New usage.dashboard.expand/collapse en/zh strings.
+- **R10 (cross-window sync):** UsageDashboard starts a 1.5s signature poll only while the panel exists and is visible (stopped on hide/dispose); getChangeSignature() on the file stores (Node stat size+mtime for both usage-v1 files; VS Code stat fallback; in-memory signatureFromLedger for tests) detects writes from another extension host. Cross-window refresh routes through efreshPreservingState() (filters + selected task/chat + overhead expansion retained) and is debounced via shouldRefreshSignature (1.5s). Status bar stays workspace-scoped. Observation failures are warn-only.
+- **Tests:** 
+pm test 39/39 pass (10 suites): all 29 pre-existing cases plus R7 round-trip, Standard/Contributor prefixes, legacy parsing, reasoning+usage coexistence, no-legacy-marker-emitted source assertion, two-prompts-one-chat/tool-loop-stays, R8 strip/unwrap/context-only, and R10 signature/debounce cases.
+- **Checks:** 
+pm run compile pass; 
+pm run lint 0/0 (67 files); touched-file oxfmt --check clean (11 files); 
+pm run package rebuilt dist/meta-spark-for-copilot-2.2.0.vsix (83 files, 395.68 KB), SHA256 CAE4DD4FE491E57BE7CC543BE4B3BE485EDEFFEAA2A3CFFE66DFE97F235F20DF; sce ls confirms test artifacts stay out of the VSIX. Report updated, ACTIVE returned to COMPLETE - PENDING REVIEW, branch pushed and verified in sync with remote.
+
