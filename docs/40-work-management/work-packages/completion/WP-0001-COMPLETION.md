@@ -4,7 +4,7 @@
 **Branch:** `wp/0001-muse-usage-monitor`
 **Date:** 2026-09-25
 **Version:** 2.2.0 (additive minor release)
-**Status:** COMPLETE - PENDING REVIEW
+**Status:** REVIEW REPAIR ACTIVE
 
 ## Summary
 
@@ -396,3 +396,97 @@ Live smoke PASS criteria:
 8. Exercise CSV export once. Clear-history may be tested after recording evidence; if tested, confirm the dashboard/status reset and subsequent activity does not resurrect prior chat/task metadata.
 
 No additional code repair is requested at this review stage. If the live smoke passes, Engineering Manager acceptance can proceed directly to routine integration under the project's delegated merge authority.
+
+
+## Live Copilot Smoke 01 / Engineering Manager Review 03 — 2026-09-25
+
+**Disposition:** FAIL — correlation transport is not surviving the real GitHub Copilot Agent Host BYOK bridge. Reopen same branch for in-scope repair.
+
+### Observed live behavior
+
+The live 2.2.0 dashboard successfully captured authoritative Muse usage (requests, input/cached/output/reasoning tokens, cache hit, and estimated cost), but correlation failed:
+
+- 18 inference steps appeared as 18 Tasks;
+- every row had exactly 1 request;
+- every row received a different Local Chat ID;
+- task/chat labels were dominated by Copilot-injected `<context>...` scaffolding instead of the user's prompt.
+
+This proves the accounting path works, but the v1 chat/task correlation design does not work in the current Copilot Agent Host path.
+
+### Root cause confirmed against current VS Code/Copilot source
+
+The Agent Host BYOK bridge recognizes only special data-part MIME types for provider state. In `AgentHostByokLmHandler` it consumes:
+
+- `stateful_marker` as the model continuation/response ID; and
+- `usage` as token usage.
+
+The custom MIME introduced by WP-0001, `meta-spark-usage-context`, is not carried forward as conversation state. Therefore our separate usage marker is discarded and every subsequent main-agent request appears marker-less, causing a new chat/task UUID.
+
+The bridge also validates the outgoing `stateful_marker` prefix against the exact selected BYOK `request.modelId`. The extension's current replay marker writer uses the generic prefix `meta-spark`, so the Agent Host path will not accept that marker as its previous-response ID either.
+
+Separately, Copilot injects prompt scaffolding such as `<context>...</context>`, reminders, attachments, current datetime metadata, and user-request wrappers. Our preview/substantive-turn logic currently treats that generated text as human prompt text, which explains the labels seen in the live dashboard and would create false new tasks even after marker persistence is repaired.
+
+### R7 — Unify usage correlation with the supported `stateful_marker` transport
+
+Replace the separate usage-context DataPart transport with one unified `stateful_marker` payload.
+
+Required behavior:
+
+1. Emit exactly one stateful marker for the main-agent response.
+2. Prefix the marker bytes with the exact VS Code/Copilot selected model ID (`modelInfo.id` / Agent Host `request.modelId`), not the API model override and not the generic `meta-spark` writer prefix.
+3. Extend the existing replay/stateful payload so it can carry:
+   - existing vision replay metadata;
+   - existing reasoning replay metadata;
+   - usage correlation metadata: schema version, writer, `chatId`, `taskId`.
+4. Preserve backward parsing of legacy `meta-spark`, known model-ID, raw UUID, and existing replay-marker payloads.
+5. On the next Agent Host request, parse the reconstructed `stateful_marker` and recover the usage correlation IDs from that same payload.
+6. Remove/retire the separate `meta-spark-usage-context` response marker so there is no second unsupported marker.
+7. Ensure `hasReplayMarkerMetadata` / marker-emission logic treats valid usage context as sufficient reason to emit a stateful marker even if a response contains no replay vision/reasoning text.
+8. Do not put usage totals, prompt text, source, or tool output into the stateful marker.
+
+### R8 — Sanitize Copilot prompt scaffolding before task detection and preview generation
+
+Add a pure sanitizer modeled on Copilot's own persisted-prompt sanitization behavior.
+
+Before deciding whether a user message is a substantive human turn, and before generating the 160-character preview, remove generated blocks including at minimum:
+
+- `<reminder>...</reminder>`
+- `<system-reminder>...</system-reminder>` and `<system_reminder>...</system_reminder>`
+- `<attachments>...</attachments>`
+- `<context>...</context>`
+- `<current_datetime>...</current_datetime>`
+- self-closing `<pr_metadata .../>`
+
+Handle `<userRequest>...</userRequest>` and `<user_query>...</user_query>` wrappers so that:
+- when real leading prompt text remains after auxiliary blocks/wrappers are removed, use that text;
+- when the wrapper contains the only real prompt, recover the wrapper's inner text;
+- a message that reduces to generated scaffolding only is **not** a substantive human turn and must not create a new task.
+
+The dashboard preview for a real user prompt must show the user's prompt text, not the injected `<context>` block seen in Smoke 01.
+
+### Required regression tests for R7/R8
+
+Add deterministic tests covering at least:
+
+1. Agent Host round trip: emit `<modelId>\\<payload>` → simulate bridge extracting responseId → simulate next request rebuilding `<modelId>\\<responseId>` → recover identical chat/task IDs.
+2. Standard and Contributor model IDs are accepted as stateful-marker prefixes.
+3. API model override does not incorrectly become the Agent Host prefix.
+4. Legacy replay/stateful marker parsing remains compatible.
+5. Unified marker preserves reasoning replay metadata and usage IDs together.
+6. A context-only Copilot user message after a marker does not create a new task.
+7. `<context>...</context><userRequest>Fix the tests</userRequest>` yields preview `Fix the tests`.
+8. Two real user prompts in one reconstructed stateful-marker chain produce one Local Chat with two Tasks.
+9. A multi-step tool loop between those prompts stays on the first task.
+10. No `meta-spark-usage-context` marker is emitted by the repaired provider path.
+
+### Revalidation / live retest
+
+After repair:
+
+- rerun the existing full deterministic suite plus new R7/R8 cases;
+- compile/lint/touched-file format/package;
+- rebuild 2.2.0 VSIX and record new SHA256;
+- return ACTIVE to COMPLETE - PENDING REVIEW;
+- repeat the live smoke from Review 02.
+
+Live PASS remains: one real Copilot chat, first prompt with multiple agent/tool steps = one Task with multiple requests; second human prompt = second Task under the same Local Chat; previews show actual user prompt text.
