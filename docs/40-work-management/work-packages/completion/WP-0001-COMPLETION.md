@@ -366,3 +366,33 @@ All five findings repaired in scope; R6 revalidation complete:
   `vsce ls` confirms test artifacts stay out of the VSIX. Report updated,
   ACTIVE returned to `COMPLETE - PENDING REVIEW`, branch pushed and verified
   in sync with remote.
+
+
+## Engineering Manager Review 02 — 2026-09-25
+
+**Disposition:** SOURCE REVIEW PASS — integration held only for the required live Copilot smoke test.
+
+Review of repair commit `4efa98b1f15514fe00aaf623240c45c2695750e6` confirms R1–R5 from Review 01 are implemented in source:
+
+- R1: local extension-host storage now uses queued Node `appendFile` for the JSONL ledger; non-missing read errors surface instead of becoming an empty ledger; regression coverage was added.
+- R2: both dashboard and command clear paths route through `UsageService.clearAll()`, which clears storage and invalidates the in-memory contexts cache.
+- R3: status selection is factored into `statusSelection.ts` and filters to the deterministic active-workspace project ID.
+- R4: non-main/utility requests with a valid usage marker inherit the existing task; marker-less requests remain unassigned.
+- R5: dashboard now exposes per-kind token/cache/output/reasoning/cost metrics, unassigned overhead by kind, and task start/last-activity times.
+
+The reported repair validation is internally consistent: 29/29 deterministic tests, compile/lint pass, touched-file formatting pass, and rebuilt 2.2.0 VSIX SHA256 `18E1CBD456ED251A0E5CFA354638C672FA40C7271D76296227AED8925B33BE21`.
+
+**Remaining acceptance gate:** one live GitHub Copilot agent smoke test using the packaged 2.2.0 VSIX. This is required before integration because the core correlation design depends on Copilot preserving the hidden `LanguageModelDataPart` marker across the real agent/tool loop, which deterministic source-level tests cannot prove.
+
+Live smoke PASS criteria:
+
+1. Install `dist/meta-spark-for-copilot-2.2.0.vsix` and reload VS Code.
+2. In a real workspace, select Muse Spark 1.3 or Muse Spark 1.3 Contributor in GitHub Copilot Agent mode.
+3. Send one substantive task that causes at least one tool/terminal continuation.
+4. Confirm the usage status bar updates and `Meta Spark: Open Usage Dashboard` shows the task with non-zero authoritative usage.
+5. Send a second substantive human prompt in the same Copilot chat.
+6. Confirm the dashboard shows **one Local Chat** containing **two distinct Tasks**; tool-loop requests for the first prompt remain on the first task rather than becoming new tasks.
+7. Confirm request drill-down and request-kind breakdown render without errors; any marker-less utility activity appears under Unassigned Copilot overhead rather than being falsely assigned.
+8. Exercise CSV export once. Clear-history may be tested after recording evidence; if tested, confirm the dashboard/status reset and subsequent activity does not resurrect prior chat/task metadata.
+
+No additional code repair is requested at this review stage. If the live smoke passes, Engineering Manager acceptance can proceed directly to routine integration under the project's delegated merge authority.
