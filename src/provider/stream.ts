@@ -20,6 +20,7 @@ interface ResponseStreamState {
 	emittedToolCallIds: string[];
 	initialResponseNoticeReported: boolean;
 	replayMarkerReported: boolean;
+	usageMarkerReported: boolean;
 }
 
 const COPILOT_USAGE_DATA_PART_MIME = 'usage';
@@ -31,6 +32,10 @@ export interface StreamChatCompletionOptions {
 	initialResponseNotice?: string;
 	getCharsPerToken: () => number;
 	setCharsPerToken: (charsPerToken: number) => void;
+	usageHooks?: {
+		onUsage?: (usage: MetaUsage, info: { durationMs: number }) => void;
+		usageMarker?: unknown;
+	};
 }
 
 export function streamChatCompletion({
@@ -40,13 +45,16 @@ export function streamChatCompletion({
 	initialResponseNotice,
 	getCharsPerToken,
 	setCharsPerToken,
+	usageHooks,
 }: StreamChatCompletionOptions): Promise<void> {
 	const state: ResponseStreamState = {
 		accumulatedReasoning: '',
 		emittedToolCallIds: [],
 		initialResponseNoticeReported: false,
 		replayMarkerReported: false,
+		usageMarkerReported: false,
 	};
+	const streamStartedAtMs = Date.now();
 	const cancelListener = observeCancellationToken(token, prepared.cacheDiagnostics);
 
 	return prepared.client
@@ -75,6 +83,7 @@ export function streamChatCompletion({
 
 				onDone: () => {
 					reportReplayMarkerOnce(prepared, progress, state, 'done');
+					reportUsageMarkerOnce(progress, state, usageHooks?.usageMarker);
 					finalizeReplayDiagnostics(
 						prepared.trailingToolResultIds,
 						state,
@@ -91,6 +100,14 @@ export function streamChatCompletion({
 					setCharsPerToken(charsPerToken);
 					prepared.cacheDiagnostics.onUsage(usage, charsPerToken);
 					reportCopilotContextUsage(progress, usage, prepared.requestKind);
+					try {
+						usageHooks?.onUsage?.(usage, { durationMs: Date.now() - streamStartedAtMs });
+					} catch (error) {
+						logger.warn(
+							formatRequestLogLine(prepared.requestKind, 'Failed to record Muse usage'),
+							error,
+						);
+					}
 				},
 			},
 			token,
@@ -137,6 +154,22 @@ function reportReplayMarkerOnce(
 	}
 	state.replayMarkerReported = true;
 	reportReplayMarker(prepared, progress, state, trigger);
+}
+
+function reportUsageMarkerOnce(
+	progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+	state: ResponseStreamState,
+	marker: unknown,
+): void {
+	if (state.usageMarkerReported || !marker) {
+		return;
+	}
+	state.usageMarkerReported = true;
+	try {
+		progress.report(marker as vscode.LanguageModelResponsePart);
+	} catch (error) {
+		logger.warn('[usage] Failed to report usage marker', error);
+	}
 }
 
 function reportSkippedReplayMarkerIfNeeded(

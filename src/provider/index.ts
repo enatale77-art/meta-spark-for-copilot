@@ -1,9 +1,12 @@
 import vscode from 'vscode';
 import { AuthManager } from '../auth';
-import { getStabilizeToolListEnabled } from '../config';
+import { getApiModelId, getStabilizeToolListEnabled } from '../config';
 import { MODELS } from '../consts';
 import { t } from '../i18n';
 import { logger } from '../logger';
+import type { UsageService, PendingUsageRequest } from '../usage';
+import { createUsageMarkerPart } from '../usage/marker';
+import { getConfiguredThinkingEffort } from './models';
 import { createCacheDiagnosticsRecorder, dumpProviderInput } from './debug';
 import { toChatInfo } from './models';
 import { BalanceCurrencyResolver } from './pricing/currency';
@@ -20,6 +23,7 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 	private readonly globalStorageUri: vscode.Uri;
 	private readonly onDidChangeLanguageModelChatInformationEmitter = new vscode.EventEmitter<void>();
 	private isActive = true;
+	private usageService: UsageService | undefined;
 
 	readonly onDidChangeLanguageModelChatInformation =
 		this.onDidChangeLanguageModelChatInformationEmitter.event;
@@ -97,6 +101,10 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 		await this.vision.openConfiguration();
 	}
 
+	setUsageService(usageService: UsageService | undefined): void {
+		this.usageService = usageService;
+	}
+
 	async provideLanguageModelChatInformation(
 		_options: vscode.PrepareLanguageModelChatModelOptions,
 		_token: vscode.CancellationToken,
@@ -145,31 +153,64 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 			return;
 		}
 
-		const prepared = await prepareChatRequest({
-			authManager: this.authManager,
-			globalStorageUri: this.globalStorageUri,
-			modelInfo,
-			segment,
+		const usagePending = await this.beginUsageTracking({
 			messages: toolFlow.messages,
 			options,
-			token,
-			cacheDiagnostics: this.cacheDiagnostics,
-			getVisionDescriber: () => this.vision.get(),
+			modelInfo,
+			requestKind,
 		});
 
-		return streamChatCompletion({
-			prepared,
-			progress,
-			token,
-			initialResponseNotice: joinInitialResponseNotices(
-				toolFlow.initialResponseNotice,
-				prepared.initialResponseNotice,
-			),
-			getCharsPerToken: () => this.charsPerToken,
-			setCharsPerToken: (charsPerToken) => {
-				this.charsPerToken = charsPerToken;
-			},
-		});
+		let prepared;
+		try {
+			prepared = await prepareChatRequest({
+				authManager: this.authManager,
+				globalStorageUri: this.globalStorageUri,
+				modelInfo,
+				segment,
+				messages: toolFlow.messages,
+				options,
+				token,
+				cacheDiagnostics: this.cacheDiagnostics,
+				getVisionDescriber: () => this.vision.get(),
+			});
+		} catch (error) {
+			await this.recordUsageAttempt(usagePending, error);
+			throw error;
+		}
+
+		try {
+			await streamChatCompletion({
+				prepared,
+				progress,
+				token,
+				initialResponseNotice: joinInitialResponseNotices(
+					toolFlow.initialResponseNotice,
+					prepared.initialResponseNotice,
+				),
+				getCharsPerToken: () => this.charsPerToken,
+				setCharsPerToken: (charsPerToken) => {
+					this.charsPerToken = charsPerToken;
+				},
+				usageHooks: this.createUsageHooks(usagePending),
+			});
+		} catch (error) {
+			if (usagePending && !usagePending.settled) {
+				await this.recordUsageAttempt(usagePending, error);
+				usagePending.settled = true;
+			}
+			throw error;
+		}
+		if (usagePending && !usagePending.settled && !token.isCancellationRequested) {
+			// No authoritative usage arrived (should be rare since
+			// stream_options.include_usage=true); record a non-billable
+			// attempt rather than fabricating tokens.
+			await this.recordUsageAttempt(
+				usagePending,
+				token.isCancellationRequested ? 'cancelled' : 'no-usage-returned',
+			);
+		} else if (usagePending && !usagePending.settled && token.isCancellationRequested) {
+			await this.recordUsageAttempt(usagePending, 'cancelled');
+		}
 	}
 
 	async provideTokenCount(
@@ -178,6 +219,94 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 		_token: vscode.CancellationToken,
 	): Promise<number> {
 		return estimateTokenCount(text, this.charsPerToken);
+	}
+
+	private async beginUsageTracking(input: {
+		messages: readonly vscode.LanguageModelChatRequestMessage[];
+		options: vscode.ProvideLanguageModelChatResponseOptions;
+		modelInfo: vscode.LanguageModelChatInformation;
+		requestKind: ReturnType<typeof classifyProviderRequest>;
+	}): Promise<{ pending: PendingUsageRequest; settled: boolean } | undefined> {
+		if (!this.usageService) {
+			return undefined;
+		}
+		try {
+			const pending = await this.usageService.beginRequest({
+				messages: input.messages,
+				requestKind: input.requestKind,
+				vscodeModelId: input.modelInfo.id,
+				apiModelId: getApiModelId(input.modelInfo.id),
+				requestInitiator: (input.options as { requestInitiator?: unknown }).requestInitiator,
+				reasoningEffort: getConfiguredThinkingEffort(
+					input.options as Parameters<typeof getConfiguredThinkingEffort>[0],
+				),
+			});
+			return { pending, settled: false };
+		} catch (error) {
+			logger.warn('[usage] Failed to begin usage tracking', error);
+			return undefined;
+		}
+	}
+
+	private createUsageHooks(
+		usagePending: { pending: PendingUsageRequest; settled: boolean } | undefined,
+	):
+		| {
+				onUsage: (usage: import('../types').MetaUsage, info: { durationMs?: number }) => void;
+				usageMarker: unknown;
+		  }
+		| undefined {
+		if (!usagePending || !this.usageService) {
+			return undefined;
+		}
+		const service = this.usageService;
+		const state = usagePending;
+		return {
+			onUsage: (usage, info) => {
+				if (state.settled) {
+					return;
+				}
+				state.settled = true;
+				void service
+					.recordCompleted(state.pending, { usage, durationMs: info.durationMs })
+					.catch((error) => logger.warn('[usage] Failed to record Muse usage', error));
+			},
+			usageMarker: (() => {
+				const { chatId, taskId } = state.pending.allocation;
+				if (!chatId || !taskId) {
+					return undefined;
+				}
+				// Only the main-agent response carries the marker so tool loops
+				// can return it; background/utility responses stay unmarked.
+				if (state.pending.requestKind !== 'main-agent') {
+					return undefined;
+				}
+				try {
+					return createUsageMarkerPart(chatId, taskId);
+				} catch (error) {
+					logger.warn('[usage] Failed to create usage marker', error);
+					return undefined;
+				}
+			})(),
+		};
+	}
+
+	private async recordUsageAttempt(
+		usagePending: { pending: PendingUsageRequest; settled: boolean } | undefined,
+		error: unknown,
+	): Promise<void> {
+		if (!usagePending || usagePending.settled || !this.usageService) {
+			return;
+		}
+		usagePending.settled = true;
+		try {
+			await this.usageService.recordAttempt(
+				usagePending.pending,
+				error instanceof Error ? error.message : String(error ?? 'unknown'),
+			);
+		} catch (recordError) {
+			logger.warn('[usage] Failed to record usage attempt', recordError);
+		}
 	}
 }
 

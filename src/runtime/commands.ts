@@ -3,8 +3,15 @@ import { EXTERNAL_URLS } from '../consts';
 import { t } from '../i18n';
 import { logger } from '../logger';
 import { ensureRequestDumpRoot } from '../provider/debug';
+import type { UsageDashboard } from '../usage/dashboard';
+import type { UsageStatusBar } from '../usage/status';
+import type { UsageStore } from '../usage/storage';
+import { toCsvText } from '../usage/csv';
 
-export function registerCommands(context: vscode.ExtensionContext): void {
+export function registerCommands(
+	context: vscode.ExtensionContext,
+	deps?: { dashboard?: UsageDashboard; statusBar?: UsageStatusBar; store?: UsageStore },
+): void {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('meta-spark.showLogs', () => logger.show()),
 		vscode.commands.registerCommand('meta-spark.openRequestDumpsFolder', () =>
@@ -16,7 +23,82 @@ export function registerCommands(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('meta-spark.openSettings', () =>
 			vscode.commands.executeCommand('workbench.action.openSettings', 'meta-spark-copilot'),
 		),
+		vscode.commands.registerCommand('meta-spark.openUsageDashboard', () =>
+			openUsageDashboard(deps),
+		),
+		vscode.commands.registerCommand('meta-spark.exportUsageCsv', () => exportUsageCsv(deps)),
+		vscode.commands.registerCommand('meta-spark.clearUsageHistory', () => clearUsageHistory(deps)),
 	);
+}
+
+async function openUsageDashboard(deps?: {
+	dashboard?: UsageDashboard;
+	statusBar?: UsageStatusBar;
+}): Promise<void> {
+	try {
+		await deps?.dashboard?.open();
+		if (!deps?.dashboard) {
+			void vscode.window.showWarningMessage(t('usage.dashboard.unavailable'));
+		}
+	} catch (error) {
+		logger.warn('Failed to open usage dashboard', error);
+		void vscode.window.showErrorMessage(t('usage.dashboard.actionFailed'));
+	}
+}
+
+async function exportUsageCsv(deps?: { store?: UsageStore }): Promise<void> {
+	try {
+		if (!deps?.store) {
+			void vscode.window.showWarningMessage(t('usage.dashboard.unavailable'));
+			return;
+		}
+		const ledger = await deps.store.readRequests();
+		if (ledger.records.length === 0) {
+			void vscode.window.showInformationMessage(t('usage.export.empty'));
+			return;
+		}
+		const uri = await vscode.window.showSaveDialog({
+			defaultUri: vscode.Uri.file('meta-spark-usage.csv'),
+			filters: { CSV: ['csv'] },
+			saveLabel: t('usage.export.saveLabel'),
+		});
+		if (!uri) {
+			return;
+		}
+		await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(toCsvText(ledger.records)));
+		void vscode.window.showInformationMessage(t('usage.export.done', ledger.records.length));
+	} catch (error) {
+		logger.warn('Failed to export usage CSV', error);
+		void vscode.window.showErrorMessage(t('usage.dashboard.actionFailed'));
+	}
+}
+
+async function clearUsageHistory(deps?: {
+	store?: UsageStore;
+	dashboard?: UsageDashboard;
+	statusBar?: UsageStatusBar;
+}): Promise<void> {
+	try {
+		if (!deps?.store) {
+			void vscode.window.showWarningMessage(t('usage.dashboard.unavailable'));
+			return;
+		}
+		const confirmed = await vscode.window.showWarningMessage(
+			t('usage.clear.confirm'),
+			{ modal: true },
+			t('usage.clear.confirmYes'),
+		);
+		if (confirmed !== t('usage.clear.confirmYes')) {
+			return;
+		}
+		await deps.store.clear();
+		await deps.dashboard?.refresh();
+		await deps.statusBar?.refresh();
+		void vscode.window.showInformationMessage(t('usage.clear.done'));
+	} catch (error) {
+		logger.warn('Failed to clear usage history', error);
+		void vscode.window.showErrorMessage(t('usage.dashboard.actionFailed'));
+	}
 }
 
 async function openRequestDumpsFolder(context: vscode.ExtensionContext): Promise<void> {

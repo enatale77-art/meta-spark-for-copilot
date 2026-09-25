@@ -1,0 +1,232 @@
+# WP-0001 Completion Report — Muse Per-Task Usage Monitor
+
+**Work package:** `docs/40-work-management/work-packages/WP-0001-MUSE-USAGE-MONITOR.md`
+**Branch:** `wp/0001-muse-usage-monitor`
+**Date:** 2026-09-25
+**Version:** 2.2.0 (additive minor release)
+**Status:** COMPLETE - PENDING REVIEW
+
+## Summary
+
+Implemented a local-first Muse usage monitor inside the existing
+`meta-spark-for-copilot` provider path. Every completed Muse request with a
+returned `MetaUsage` object becomes one privacy-bounded ledger record; records
+roll up deterministically Request → Task → Local Chat → Project and are
+surfaced in a local dashboard, CSV export, status bar, and clear-history flow.
+No proxy, external service, database, telemetry, or Meta-dashboard scraper was
+introduced.
+
+## Final architecture / file list
+
+New `src/usage/` subsystem (separation of concerns per the WP):
+
+- `src/usage/types.ts` — `UsageRequestRecord`, chat/task metadata,
+  allocation, pricing, and cost-breakdown types; `emptyContexts()`.
+- `src/usage/context.ts` — pure chat/task allocation, marker payload
+  build/parse/validate, project identity (`deriveProjectId`), preview
+  normalization (160-char cap), substantive-turn detection, utility-kind list.
+- `src/usage/marker.ts` — `LanguageModelDataPart` adapter
+  (`USAGE_MARKER_MIME = 'meta-spark-usage-context'`), creation/parsing, and
+  latest-valid-marker scan over assistant history.
+- `src/usage/pricing.ts` — pure `splitUsageTokens`, `resolvePricing` from the
+  extension `MODELS` catalog, and `calculateCost`
+  (uncached + cached + output; reasoning never double-billed).
+- `src/usage/storage.ts` — JSONL/context pure helpers
+  (`serializeRecord`, `parseLedgerText` with truncated-tail tolerance,
+  `parseContextsText`, `serializeContexts`), `UsageStore` interface,
+  in-memory store for tests, and `usageClearTargets()` scope guard.
+- `src/usage/fileStore.ts` — VS Code FileSystem-backed store under
+  `<globalStorageUri>/usage-v1/`; serialized writes; atomic
+  temp-file + rename for `contexts.json`; clear touches only the two
+  usage-v1 files.
+- `src/usage/aggregate.ts` — single-pass O(n) `aggregateRequests`,
+  `rollupTasks` (with per-kind breakdown), `rollupChats`, `rollupProjects`,
+  `filterByTime` (7d/30d/90d/all).
+- `src/usage/csv.ts` — request-granularity CSV (`CSV_COLUMNS`, `toCsvRows`,
+  `toCsvText`, `escapeCsvField`); capped preview only.
+- `src/usage/recorder.ts` — `UsageService` lifecycle integration:
+  `beginRequest` (correlation before the Meta call), `recordCompleted`
+  (authoritative `MetaUsage`), `recordAttempt` (null-usage attempts excluded
+  from totals), context creation/touch, `toCorrelationMessages`.
+- `src/usage/dashboard.ts` — local webview with restrictive CSP, no remote
+  JS/CSS; summary cards, 7d/30d/90d/All + project/model/search filters, task
+  table, task drill-down (timeline + kind breakdown + copyable IDs), local-chat
+  roll-up, local-chat limitation note, escaped HTML throughout.
+- `src/usage/status.ts` — `UsageStatusBar`: compact most-recent-task summary
+  for the active workspace, rich tooltip with IDs, click opens dashboard,
+  configurable, never blocks model requests.
+- `src/usage/index.ts` — subsystem barrel exports.
+
+Integration edits:
+
+- `src/provider/index.ts` — begin usage tracking before the Meta request;
+  attach authoritative-usage hooks; record non-billable attempts on
+  prepare/stream failure or missing usage; preserve streaming/tool-call/replay/
+  vision/diagnostics/cancellation behavior; existing Copilot `usage` reporting
+  untouched.
+- `src/provider/stream.ts` — feed the existing `onUsage` path into the
+  recorder (non-blocking, warn-only on failure); emit the hidden usage marker
+  on `onDone` independently of replay markers; main-agent responses only.
+- `src/runtime/lifecycle.ts` — instantiate the file store, dashboard, usage
+  service, and status bar; wire `onRecorded` refresh; inject the service into
+  `MetaChatProvider`; avoid global mutable singletons.
+- `src/runtime/provider.ts` — accept/inject the usage service.
+- `src/runtime/commands.ts` — `meta-spark.openUsageDashboard`,
+  `meta-spark.exportUsageCsv` (save dialog, request rows), and
+  `meta-spark.clearUsageHistory` (modal confirmation, usage-v1 only, UI
+  refresh).
+- `src/config.ts` — `getUsageStatusBarEnabled()` for
+  `meta-spark-copilot.usageMonitor.statusBar` (default `true`).
+- `src/i18n.ts` — English + Chinese strings for dashboard/export/clear/status.
+
+Metadata/docs:
+
+- `package.json` — version 2.2.0; three usage commands; status-bar setting;
+  portable `vscode:prepublish` (`node scripts/prepare-marketplace-readme.cjs`);
+  `test` runs compile + deterministic `node:test` suite.
+- `package-lock.json` — root version synced 0.6.2 → 2.2.0 (stale baseline).
+- `package.nls.json`, `package.nls.zh-cn.json` — command/setting strings.
+- `README.md`, `README.zh-cn.md` — Usage Monitor overview, open/export/clear,
+  local storage schema, local chat/task ID semantics + no-native-deep-link
+  limitation, status-bar setting, 160-char preview privacy statement.
+- `CHANGELOG.md` — 2.2.0 feature entry.
+- `scripts/prepare-marketplace-readme.cjs` — portable Marketplace README
+  generator (strips `marketplace-readme:remove-*` sections; no bash needed).
+- `.vscodeignore` — excludes `test/`, `scripts/`, `ACTIVE.md`,
+  `*.code-workspace`, and other non-runtime files from the VSIX.
+- `test/usage.test.cjs` — 22 deterministic `node:test` cases (CommonJS
+  against compiled `out/`, no loader, no VS Code runtime).
+
+## Correlation behavior and known limitations
+
+- First substantive `main-agent` request with no valid marker → new UUID
+  `chat_id` + new UUID `task_id`. The marker (`{version, writer, chatId,
+  taskId}` only) is emitted as a hidden `LanguageModelDataPart` in the
+  main-agent assistant response so Copilot tool loops/history return it.
+- Same task retained across tool continuations and additional inference calls
+  while the latest valid marker is current.
+- New substantive human text turn after the latest marker → same `chat_id`,
+  new `task_id`.
+- Tool-result-only messages, terminal notifications, customization/control
+  updates, and utility/background kinds never create a task by themselves.
+- Non-main requests inherit the task only when a valid marker is actually
+  present (and the kind is not a known utility); otherwise they are recorded
+  as unassigned Copilot overhead — never joined by timing/editor/process
+  heuristics.
+- Failed/cancelled calls without authoritative usage become `attempt` records
+  with null tokens/cost, excluded from totals.
+- Dashboard labels IDs as extension-owned Local Chat IDs and states that v1
+  cannot deep-link to the exact native Copilot chat.
+- Nullable `nativeSessionId` fields are preserved on chat/task metadata for a
+  future VS Code API; no private Copilot storage is read.
+- Limitation: no Extension Development Host smoke test was run in this
+  session; correlation is covered by deterministic provider-level tests and
+  the synthetic sequence below. Hidden-marker survival across the real
+  Copilot loop remains to be confirmed in a live agent conversation.
+
+## Storage schema / version
+
+Directory: `<globalStorageUri>/usage-v1/`
+
+- `requests.jsonl` — append-only, one JSON object per line,
+  `version: 1` per record. Fields: `id`, `timestamp`/`timestampMs`,
+  `projectId`/`projectName`, `chatId`/`taskId` (nullable), `vscodeModelId`,
+  `apiModelId`, `requestKind`, `requestInitiator` (nullable, ≤200 chars),
+  `reasoningEffort` (nullable), `promptTokens`, `cachedInputTokens`,
+  `uncachedInputTokens` (`max(prompt - cached, 0)` unless Meta supplies an
+  explicit miss count), `completionTokens`, `reasoningTokens` (breakdown of
+  completion, never billed twice), `totalTokens`, `estimatedCostUsd`,
+  `pricingInputRate`/`pricingCachedRate`/`pricingOutputRate`,
+  `pricingModelId`/`pricingSource`, `costUncertain`, `durationMs`, `status`
+  (`completed` | `attempt`), `error` (nullable), `taskPreview` (nullable,
+  whitespace-normalized, ≤160 chars). No full prompts, source, tool data,
+  reasoning/response text, bodies, paths, or API keys.
+- `contexts.json` — `{ version: 1, chats, tasks }` with chat display names
+  (first preview default), per-task previews, created/updated timestamps, and
+  nullable `nativeSessionId`. Written atomically (temp file + rename with a
+  delete-then-rename fallback).
+- Crash safety: a truncated final JSONL line is counted as corruption and
+  ignored while older history stays readable; corrupted contexts text yields
+  empty contexts plus a non-fatal dashboard state.
+- No retention deletion in v1; clear-history deletes only the two usage-v1
+  files.
+
+## Test / check results (2026-09-25, Windows, this branch)
+
+- `npm ci` — pass (322 packages; 11 pre-existing moderate/high advisories,
+  no new deps added by this WP).
+- `npm test` (`npm run compile` + `node --test test/usage.test.cjs`) — pass:
+  22 tests, 7 suites, 22 pass, 0 fail. Covers: Contributor + Standard cost
+  formulas; cached/uncached split + missing-cache behavior; reasoning not
+  double-billed; new-chat first-task allocation; same-task tool continuation;
+  new-turn → new task/same chat; tool-result-only/terminal/background/control
+  non-creation; missing-marker → unassigned; marker round-trip + version/
+  writer/payload rejection; multi-root project determinism; preview
+  normalization + 160-char cap; JSONL truncated-tail tolerance; contexts
+  round-trip; aggregation totals + cache-hit % (attempts excluded); task/chat
+  rollups; time filters; CSV escaping + row parity; clear-history scope;
+  synthetic provider-level sequence (first prompt → accumulation → tool
+  continuation → second task → unassigned overhead → rollup/export parity).
+- `npm run compile` — pass (`tsc -p ./`, strict).
+- `npm run lint` (`oxlint`) — pass, 0 warnings / 0 errors (64 files).
+- `npm run format:check` (`oxfmt --check src/`) — global check still fails on
+  44 pre-existing untouched files (Windows CRLF baseline, per the WP caution;
+  no mass reformat applied). All 19 WP-touched/new files verify clean:
+  `npx oxfmt --check src/usage/ src/provider/index.ts src/provider/stream.ts
+  src/runtime/commands.ts src/runtime/lifecycle.ts src/runtime/provider.ts
+  src/config.ts src/i18n.ts` → "All matched files use the correct format."
+- `npm run package` — pass after two minimal packaging repairs (see
+  Deviations): `dist/meta-spark-for-copilot-2.2.0.vsix` (82 files, 387.17 KB).
+
+Packaged VSIX:
+
+- Filename: `dist/meta-spark-for-copilot-2.2.0.vsix`
+- SHA256: `4BBA216385E73D6B3B2FDF88FD5A9F1877BE2877062832B2E864180F243085F6`
+- Scope verified: runtime `out/` (incl. 12 `usage/` files), resources,
+  manifest, license/changelog/readme/nls only — `test/`, `scripts/`,
+  `src/`, `docs/`, `ACTIVE.md`, and `*.code-workspace` excluded.
+- Note: `dist/` and `*.vsix` are git-ignored build outputs; the VSIX is a
+  local distributable, not committed.
+
+Functional acceptance (synthetic, deterministic): covered by the
+"synthetic provider-level sequence" test — ledger → rollups → CSV parity and
+clear-scope assertions hold; clear-history resets usage storage/UI without
+touching API-key state by construction (store scope guard + secrets untouched).
+No live Copilot session was exercised.
+
+## Deviations from the WP
+
+None in product scope. Two minimal packaging/metadata repairs were required
+because the baseline could not package as specified; both pre-date this branch
+(verified against `main`):
+
+1. `vscode:prepublish` invoked `bash scripts/prepare-marketplace-readme.sh`,
+   but no `scripts/` directory exists at baseline and the Windows host has no
+   usable `bash` for that path. Added portable
+   `scripts/prepare-marketplace-readme.cjs` (Node builtins only; same
+   marker-stripping semantics) and pointed `vscode:prepublish` at it.
+   `scripts/` is excluded from the VSIX via `.vscodeignore`.
+2. `package-lock.json` root version was stale at `0.6.2` (untouched since the
+   initial port) while `package.json` is `2.2.0`. Synced the two root
+   `version` fields to `2.2.0`; no dependency changes. (`npm ci` passes.)
+3. `README.md` packaging note updated `.sh` → `.cjs` to match (1).
+4. `.vscodeignore` extended to exclude `test/`, `scripts/`, `ACTIVE.md`, and
+   `*.code-workspace` so the first `npm run package` output (86 files,
+   including tests and work-package locator) became the clean 82-file VSIX.
+   This enforces the WP's "keep test artifacts out of the packaged VSIX".
+
+No unrelated refactors were made; the global format baseline was left alone.
+
+## Follow-up backlog recommendations
+
+- Live-host smoke test: dashboard command, status item, export dialog, clear
+  confirmation, and hidden-marker survival in a real Copilot agent
+  conversation (record limitation closure).
+- Consider a dashboard state-preserving refresh (currently resets filters to
+  30d/all on refresh) and pagination/virtualization if ledgers grow large.
+- Optional: corrupted-ledger surfacing in the dashboard UI (currently logged,
+  non-fatal) and a record-count guard for very large histories.
+- Revisit `format` script scope (currently WP-file-scoped) vs. the
+  repo-wide CRLF baseline before any future formatting pass.
+- Upstreaming remains a later decision; the `src/usage/` module boundary was
+  kept so the delta stays portable. No publication performed per scope-out.
