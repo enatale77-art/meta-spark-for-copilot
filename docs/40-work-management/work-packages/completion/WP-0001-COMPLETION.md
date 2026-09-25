@@ -610,3 +610,34 @@ Add/adjust deterministic rendering/aggregation tests where practical, then verif
 - one multi-step user task renders as **one collapsed Task card** with aggregated usage;
 - a second prompt in the same Copilot chat becomes a second Task card under the same Local Chat;
 - the default screen remains readable without horizontal scrolling.
+
+
+### R10 — Keep open dashboards synchronized across VS Code windows
+
+**Live observation:** with the dashboard open in two VS Code workspaces, the stale window catches up immediately when **Refresh** is clicked, proving both extension hosts are reading the same shared usage ledger. It then stops updating while Muse work continues in the other window. This is because `onRecorded` refreshes only the dashboard owned by the extension host that recorded the request.
+
+**Required behavior:**
+
+1. An open Muse Usage dashboard must notice changes written by another VS Code extension host/window and refresh automatically.
+2. With identical filters (for example Project = All), two simultaneously open dashboards should converge on the same ledger totals without manual Refresh.
+3. Keep the current workspace-scoped status bar behavior unchanged; status bars are intentionally per-workspace and need not match.
+4. Cross-window refresh must preserve the dashboard's current period/project/model/search filters and any intentionally selected/expanded Task/Local Chat/Overhead card. Do not reset the view to defaults merely because another window wrote usage.
+5. Avoid continuous polling when no Muse Usage dashboard is open/visible. Start observation when the panel is visible; suspend/stop it when hidden or disposed.
+6. Debounce/coalesce bursts of ledger writes so a fast Agent loop does not cause excessive webview rebuilds.
+7. Watch both `requests.jsonl` and `contexts.json` (or an equivalent usage-v1 change signature) so usage totals and task/chat labels remain coherent.
+8. The mechanism must tolerate the usage directory/files not existing yet and files being replaced/cleared.
+9. Observation failures must be warn-only and must never interfere with model requests or usage recording.
+
+**Preferred implementation:** because `globalStorageUri` is local for the primary desktop use case, use a lightweight file/directory change observer or low-frequency signature check scoped to the open dashboard. A ~1–2 second visible-panel refresh latency is acceptable. Favor robustness on Windows over immediate sub-second UI churn.
+
+**Verification:**
+
+- deterministic/testable change-signature/debounce logic where practical;
+- manual two-window test:
+  1. open Muse Usage in Workspace A and Workspace B;
+  2. set both to Project = All and the same filters;
+  3. run a Muse Agent task in A;
+  4. without clicking Refresh in B, confirm B catches up automatically within the designed refresh interval;
+  5. confirm B retains its chosen filters/expanded-card state;
+  6. hide/close B's dashboard and confirm its observer stops/suspends;
+  7. reopen and confirm it immediately reconciles to current ledger state.
