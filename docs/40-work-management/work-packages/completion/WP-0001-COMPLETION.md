@@ -4,7 +4,7 @@
 **Branch:** `wp/0001-muse-usage-monitor`
 **Date:** 2026-09-25
 **Version:** 2.2.0 (additive minor release)
-**Status:** COMPLETE - PENDING REVIEW
+**Status:** REVIEW REPAIR ACTIVE
 
 ## Summary
 
@@ -230,3 +230,72 @@ No unrelated refactors were made; the global format baseline was left alone.
   repo-wide CRLF baseline before any future formatting pass.
 - Upstreaming remains a later decision; the `src/usage/` module boundary was
   kept so the delta stays portable. No publication performed per scope-out.
+
+
+## Engineering Manager Review 01 — 2026-09-25
+
+**Disposition:** CHANGES REQUIRED — remain on `wp/0001-muse-usage-monitor` and repair in scope under WF-003.
+
+The implementation is structurally strong and the reported automated checks are useful, but review of the actual branch found the following acceptance issues that must be corrected before integration.
+
+### R1 — Make `requests.jsonl` a true append ledger and remove destructive read-error behavior
+
+**Current issue:** `src/usage/fileStore.ts::appendRequest` reads the entire ledger, concatenates one line in memory, and rewrites the whole file. It also treats any read failure as an empty ledger. This is not an append-only implementation: runtime cost grows with ledger size, a non-FileNotFound read error can cause history replacement, and a crash during whole-file rewrite can damage older history rather than only a final partial line.
+
+**Required correction:**
+- append each JSONL line using a true file append operation on the extension-host filesystem;
+- retain serialized write ordering;
+- create the usage directory as needed;
+- treat only a genuine missing file as empty/new;
+- never overwrite prior history because a read/open operation failed;
+- retain truncated-final-line tolerance on reads;
+- add a regression test proving existing records remain intact across multiple appends and that non-missing read/open errors are not converted into an empty ledger.
+
+### R2 — Clear-history must invalidate the in-memory contexts cache on every clear path
+
+**Current issue:** both dashboard and Command Palette clear paths delete storage, but `UsageService.contextsCache` remains populated. A later request can write stale chat/task metadata back to `contexts.json`, partially resurrecting data the user explicitly cleared.
+
+**Required correction:**
+- centralize or otherwise guarantee `UsageService.invalidateContextsCache()` runs after a successful clear;
+- cover both dashboard and `Meta Spark: Clear Usage History` command paths;
+- refresh dashboard/status after invalidation;
+- add a testable seam/regression check demonstrating cleared contexts are not resurrected by a subsequent request.
+
+### R3 — Status bar must be scoped to the active workspace/project
+
+**Current issue:** `src/usage/status.ts` constructs a set of current workspace URIs but does not use it. The status item therefore displays the globally most recent tracked task, which can belong to another project.
+
+**Required correction:**
+- derive the current project ID with the same deterministic project-identity logic used by the recorder;
+- filter candidate status records to that project before selecting the latest task;
+- show the empty state when the active workspace has no usage even if another workspace does;
+- add deterministic coverage for cross-project status selection logic by factoring the selection into pure/testable code.
+
+### R4 — Valid marker evidence must allow safe utility/background attribution to the current task
+
+**Current issue:** `allocateUsageContext` refuses task inheritance for known utility request kinds even when a valid usage-context marker is present. This loses exactly the Copilot orchestration overhead the monitor is intended to attribute per task.
+
+**Required correction:**
+- for every non-main request, a valid `chat_id` + `task_id` marker may inherit that existing task;
+- utility/background requests must never create a task;
+- without valid marker evidence they remain unassigned overhead;
+- update tests to cover utility-with-marker = inherited, utility-without-marker = unassigned.
+
+### R5 — Surface actual request-kind usage and unassigned overhead in the dashboard
+
+**Current issue:** task detail currently renders request-kind counts only (for example `main-agent ×N`). The underlying rollup contains token/cost totals but the dashboard does not show them. Unassigned overhead is included in top-level totals but has no dedicated breakdown. The task table also omits the required start/end or last-activity time.
+
+**Required correction:**
+- show per-kind request count, input, cached input/cache-hit %, output, reasoning, and estimated cost for a selected task;
+- add an **Unassigned Copilot overhead** breakdown for records with no task ID, grouped by request kind, so unattributable overhead is visible rather than disappearing into the top-level cards;
+- add task start/last-activity (or equivalent start/end) to the task table;
+- keep all prompt-preview/privacy limits unchanged.
+
+### R6 — Revalidate and refresh completion evidence
+
+After R1–R5:
+- run the targeted deterministic tests plus `npm test`, `npm run compile`, `npm run lint`, touched-file formatter check, and `npm run package`;
+- update this Completion Report with the repair disposition, final test counts, and new VSIX SHA256;
+- leave ACTIVE at `COMPLETE - PENDING REVIEW` only after repairs are complete and pushed.
+
+The previously reported lack of a live Copilot host smoke test remains a known acceptance risk. It is not a separate code defect, but the final release should receive one real Copilot-agent smoke test before integration/release so hidden usage-marker survival is confirmed end to end.
