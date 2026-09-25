@@ -490,3 +490,123 @@ After repair:
 - repeat the live smoke from Review 02.
 
 Live PASS remains: one real Copilot chat, first prompt with multiple agent/tool steps = one Task with multiple requests; second human prompt = second Task under the same Local Chat; previews show actual user prompt text.
+
+
+### R9 — Redesign the dashboard around clean summary cards and progressive disclosure
+
+**Product Owner direction:** present the primary information on clean summarized UI cards and hide diagnostic/detail chatter unless the user explicitly opens a card.
+
+The current wide task/local-chat tables are too dense, expose IDs and timestamps continuously, and degrade badly as the editor narrows. Replace the primary table-first presentation with a responsive card-first dashboard.
+
+#### Primary dashboard hierarchy
+
+Keep the existing top summary metrics, but make the rest of the default view intentionally concise:
+
+1. **Overall summary cards**
+   - Requests
+   - Input tokens
+   - Cached tokens / cache hit
+   - Output tokens
+   - Estimated cost
+   - Reasoning may be available in detail rather than requiring its own top-level card if space is constrained.
+
+2. **Task cards**
+   Each collapsed task card should show only the information a user is likely to care about at a glance:
+   - cleaned human task title/preview as the dominant label;
+   - project/workspace name;
+   - request count;
+   - compact total input tokens;
+   - cache-hit percentage;
+   - compact output tokens;
+   - estimated cost;
+   - optional compact last-activity time if it fits without clutter.
+
+   Do **not** show UUIDs, full Local Chat IDs, full timestamps, request-by-request rows, reasoning totals, pricing internals, or request-kind chatter in the collapsed/default state.
+
+3. **Local Chat cards**
+   Present each local chat as a compact roll-up card, e.g.:
+   - chat display title derived from the first cleaned task preview;
+   - task count;
+   - request count;
+   - total estimated cost;
+   - optional compact token/cache summary.
+
+   Do not expose the local-chat UUID in the collapsed card.
+
+4. **Unassigned Copilot overhead**
+   Present one compact summary card/section in the default view showing total unassigned requests/tokens/cost. Individual request kinds and their metrics stay hidden until expanded.
+
+#### Expanded task detail
+
+Clicking/tapping a Task card expands or opens its detail view. Only then show:
+
+- Local Chat ID and Task ID with copy actions;
+- start + last-activity timestamps;
+- complete token metrics (input, cached, uncached, output, reasoning, total);
+- request-kind breakdown with requests/input/cached/cache-hit/output/reasoning/cost;
+- individual request timeline;
+- model / reasoning effort / status information where useful.
+
+The detail view may be a collapsible inline panel, selected-card detail region, or dedicated webview subpanel; choose the simplest robust implementation. It must be easy to close/collapse back to the summary view.
+
+#### Expanded Local Chat detail
+
+Clicking/tapping a Local Chat card should reveal:
+
+- Local Chat ID and copy action;
+- all Task cards belonging to that chat;
+- aggregate tokens/cache/cost;
+- start/last activity.
+
+This is where the user should be able to understand the hierarchy **Chat → Tasks → Requests** without seeing identifiers everywhere by default.
+
+#### Responsive behavior
+
+- No page-level horizontal scrolling in normal dashboard use.
+- Task and chat cards must reflow as the editor width shrinks (single column on narrow widths; multi-column/grid when wider).
+- Long cleaned task titles wrap/clamp cleanly and must not force the layout wider.
+- Expanded request tables may use local horizontal scrolling if truly necessary, but the primary dashboard must not depend on a wide table.
+- Maintain readable targets and spacing at narrow editor widths.
+
+#### Interaction / usability
+
+- Entire cards should have a clear clickable/tappable affordance.
+- Preserve current period/project/model/search filters.
+- Preserve CSV export and clear-history controls, but keep them visually secondary to usage summaries.
+- Default dashboard refresh should keep the user at the summary level unless they intentionally select a card.
+- Use VS Code theme variables and existing CSP/security constraints; no remote UI dependencies.
+- Keep all existing privacy constraints and the 160-character cleaned preview cap.
+
+#### Acceptance examples
+
+At default view, the user should see something conceptually like:
+
+```text
+Overall
+[ 18 requests ] [ 923k input ] [ 92.1% cached ] [ 8.5k output ] [ $0.0107 ]
+
+Tasks
+┌ Fix library import issue ─────────────────────┐
+│ Library Builder                               │
+│ 18 req   923k in   92.1% cache   8.5k out   │
+│                                      $0.0107  │
+└───────────────────────────────────────────────┘
+
+Local chats
+┌ Fix library import issue                      ┐
+│ 2 tasks · 25 requests · $0.0138              │
+└───────────────────────────────────────────────┘
+
+Unassigned Copilot overhead
+┌ 3 requests · 41k tokens · $0.0004            ┐
+└───────────────────────────────────────────────┘
+```
+
+Clicking the Task/Chat/Overhead card reveals the dense diagnostics. The dense diagnostics must not dominate the default screen.
+
+#### R9 verification
+
+Add/adjust deterministic rendering/aggregation tests where practical, then verify manually in a narrow and wide VS Code editor. The live smoke retest for R7/R8 should also confirm that:
+- one multi-step user task renders as **one collapsed Task card** with aggregated usage;
+- a second prompt in the same Copilot chat becomes a second Task card under the same Local Chat;
+- the default screen remains readable without horizontal scrolling.
