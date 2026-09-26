@@ -512,7 +512,8 @@ export class UsageDashboard {
 			selectedChat
 				? [
 						`<div class="detail" id="chat-detail">`,
-						`<h3>${escapeHtml(selectedChat.displayName)}</h3>`,
+						`<h3>${escapeHtml(t('usage.dashboard.localSubject'))}: ${escapeHtml(selectedChat.displayName)}</h3>`,
+						`<p class="note">${escapeHtml(t('usage.dashboard.localSubjectNote'))}</p>`,
 						`<p class="note">chat_id <code>${escapeHtml(selectedChat.chatId)}</code> <button data-copy="${escapeHtml(selectedChat.chatId)}">${escapeHtml(t('usage.dashboard.copy'))}</button></p>`,
 						`<p class="note">${escapeHtml(t('usage.dashboard.tasks'))}: ${selectedChat.taskCount} · ${escapeHtml(t('usage.dashboard.requests'))}: ${selectedChat.requests} · ${escapeHtml(t('usage.dashboard.cost'))}: ${formatCost(selectedChat.estimatedCostUsd)}</p>`,
 						`<p class="note">${escapeHtml(t('usage.dashboard.start'))}: ${escapeHtml(formatDateTime(selectedChat.firstSeenMs))} · ${escapeHtml(t('usage.dashboard.lastActivity'))}: ${escapeHtml(formatDateTime(selectedChat.lastSeenMs))}</p>`,
@@ -752,8 +753,12 @@ function chatCard(
 	_tasks: unknown,
 	expanded: boolean,
 ): string {
+	// R12B: the collapsed chat card is the chat-level grouping/subject, not
+	// the native Copilot title. The local subject derives from the first
+	// cleaned human task preview and stays stable for the chat lifetime.
 	return [
 		`<div class="tile" role="listitem" tabindex="0" data-chat="${escapeHtml(chat.chatId)}" aria-expanded="${expanded ? 'true' : 'false'}" title="${escapeHtml(t('usage.dashboard.expand'))}">`,
+		`<div class="sub">${escapeHtml(t('usage.dashboard.localSubject'))}</div>`,
 		`<div class="title">${escapeHtml(chat.displayName)}</div>`,
 		`<div class="sub">${chat.taskCount} tasks · ${chat.requests} requests</div>`,
 		`<div class="metrics"><span>${formatCompact(chat.inputTokens)} in</span><span>${chat.cacheHitPct.toFixed(1)}% cache</span></div>`,

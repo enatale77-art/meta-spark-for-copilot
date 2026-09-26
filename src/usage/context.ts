@@ -204,12 +204,12 @@ export function normalizePreview(text: string): string {
 }
 
 /**
- * R8: strip Copilot-injected prompt scaffolding before task detection and
- * preview generation. Removes generated blocks (reminder, attachments,
- * context, current_datetime, pr_metadata) and unwraps userRequest/user_query
- * wrappers so the dashboard shows the real human prompt. A message that
- * reduces to scaffolding only yields an empty string and is never a
- * substantive human turn.
+ * R8/R12A: strip Copilot-injected prompt scaffolding before task detection
+ * and preview generation. Removes generated blocks (reminder,
+ * reminderInstructions + hyphen/underscore variants, attachments, context,
+ * current_datetime, pr_metadata) and unwraps userRequest/user_query wrappers
+ * so the dashboard shows the real human prompt. A message that reduces to
+ * scaffolding only yields an empty string and is never a substantive turn.
  */
 export function sanitizePromptText(text: string): string {
 	if (!text) {
@@ -218,6 +218,15 @@ export function sanitizePromptText(text: string): string {
 	let cleaned = text;
 	cleaned = cleaned.replace(/<reminder>[\s\S]*?<\/reminder>/gi, ' ');
 	cleaned = cleaned.replace(/<system[-_]reminder>[\s\S]*?<\/system[-_]reminder>/gi, ' ');
+	// R12A: Copilot's camel-case <reminderInstructions> scaffolding (plus
+	// hyphen/underscore variants defensively). Paired blocks first, then any
+	// orphan/self-closing tags so unclosed scaffolding cannot leak into
+	// task titles.
+	cleaned = cleaned.replace(
+		/<reminder[-_]*instructions\b[^>]*>[\s\S]*?<\/reminder[-_]*instructions\s*>/gi,
+		' ',
+	);
+	cleaned = cleaned.replace(/<\/?reminder[-_]*instructions\b[^>]*\/?>/gi, ' ');
 	cleaned = cleaned.replace(/<attachments>[\s\S]*?<\/attachments>/gi, ' ');
 	cleaned = cleaned.replace(/<context>[\s\S]*?<\/context>/gi, ' ');
 	cleaned = cleaned.replace(/<current_datetime>[\s\S]*?<\/current_datetime>/gi, ' ');

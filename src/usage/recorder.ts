@@ -258,6 +258,9 @@ export class UsageService {
 			const chat = contexts.chats[allocation.chatId];
 			chat.updatedAt = nowIso;
 			chat.updatedAtMs = nowMs;
+			// R12B: the local chat subject is the first cleaned human task
+			// preview and stays stable for the chat lifetime. Only fill an
+			// empty/placeholder subject; never rewrite it from later tasks.
 			if ((!chat.displayName || chat.displayName.startsWith('Local chat ')) && allocation.preview) {
 				chat.displayName = normalizePreview(allocation.preview);
 			}

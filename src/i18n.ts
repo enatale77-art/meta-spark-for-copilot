@@ -123,6 +123,10 @@ const zh: Translations = {
 	'usage.dashboard.collapse': '收起',
 	'usage.dashboard.empty': '该视图暂无用量记录。请用 Muse Spark 运行一次 Copilot 任务。',
 	'usage.dashboard.emptyChats': '该视图暂无本地会话。',
+	'usage.dashboard.subject': '主题',
+	'usage.dashboard.localSubject': '本地主题',
+	'usage.dashboard.localSubjectNote':
+		'本地主题取自该会话首个已清理的人类任务预览；不是原生 Copilot 会话标题。',
 	'usage.dashboard.localChatNote':
 		'本地会话 ID 由本扩展生成，用于归组任务；v1 无法深链到原生 Copilot 会话。',
 	'usage.export.title': '导出 CSV',
@@ -369,6 +373,10 @@ const en: Translations = {
 	'usage.dashboard.collapse': 'Collapse',
 	'usage.dashboard.empty': 'No usage records in this view yet. Run a Copilot task with Muse Spark.',
 	'usage.dashboard.emptyChats': 'No local chats in this view yet.',
+	'usage.dashboard.subject': 'Subject',
+	'usage.dashboard.localSubject': 'Local subject',
+	'usage.dashboard.localSubjectNote':
+		'Local subject is the first cleaned human task preview in this chat; it is not the native Copilot session title.',
 	'usage.dashboard.localChatNote':
 		'Local Chat IDs are owned by this extension for grouping tasks. v1 cannot deep-link to the exact native Copilot chat.',
 	'usage.export.title': 'Export CSV',

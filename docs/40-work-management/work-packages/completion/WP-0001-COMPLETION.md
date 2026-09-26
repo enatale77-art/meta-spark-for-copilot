@@ -4,7 +4,7 @@
 **Branch:** `wp/0001-muse-usage-monitor`
 **Date:** 2026-09-25
 **Version:** 2.2.0 (additive minor release)
-**Status:** REVIEW REPAIR ACTIVE
+**Status:** COMPLETE - PENDING REVIEW
 
 ## Summary
 
@@ -654,7 +654,8 @@ All four findings repaired in scope; revalidation complete.
 - **R8 (prompt sanitizer):** src/usage/context.ts::sanitizePromptText strips <reminder>, <system-reminder>/<system_reminder>, <attachments>, <context>, <current_datetime>, and self-closing <pr_metadata/>, then unwraps <userRequest>/<user_query> (leading text preferred; wrapper inner text recovered when it holds the only real prompt). isSubstantiveHumanTurn and 
 ormalizePreview operate on sanitized text, so scaffolding-only messages never create tasks and previews show the human prompt (still whitespace-collapsed, 160-char capped).
 - **R9 (card-first dashboard):** src/usage/dashboard.ts renders overall summary cards, collapsed task cards (title, project, req/in/cache-hit/out, cost), collapsed local-chat roll-up cards, and one compact unassigned-overhead card; IDs, timestamps, per-kind tables, and request timelines appear only in expanded detail (task/chat/overhead). Responsive grid with no page-level horizontal scroll; expanded tables scroll locally. Filters, export, and clear preserved; refresh preserves filter/expansion state. New usage.dashboard.expand/collapse en/zh strings.
-- **R10 (cross-window sync):** UsageDashboard starts a 1.5s signature poll only while the panel exists and is visible (stopped on hide/dispose); getChangeSignature() on the file stores (Node stat size+mtime for both usage-v1 files; VS Code stat fallback; in-memory signatureFromLedger for tests) detects writes from another extension host. Cross-window refresh routes through efreshPreservingState() (filters + selected task/chat + overhead expansion retained) and is debounced via shouldRefreshSignature (1.5s). Status bar stays workspace-scoped. Observation failures are warn-only.
+- **R10 (cross-window sync):** UsageDashboard starts a 1.5s signature poll only while the panel exists and is visible (stopped on hide/dispose); getChangeSignature() on the file stores (Node stat size+mtime for both usage-v1 files; VS Code stat fallback; in-memory signatureFromLedger for tests) detects writes from another extension host. Cross-window refresh routes through 
+efreshPreservingState() (filters + selected task/chat + overhead expansion retained) and is debounced via shouldRefreshSignature (1.5s). Status bar stays workspace-scoped. Observation failures are warn-only.
 - **Tests:** 
 pm test 39/39 pass (10 suites): all 29 pre-existing cases plus R7 round-trip, Standard/Contributor prefixes, legacy parsing, reasoning+usage coexistence, no-legacy-marker-emitted source assertion, two-prompts-one-chat/tool-loop-stays, R8 strip/unwrap/context-only, and R10 signature/debounce cases.
 - **Checks:** 
@@ -737,7 +738,10 @@ No change is requested to the overall R7 stateful-marker architecture or the R9 
 
 All four R11 findings repaired in scope; revalidation complete.
 
-- **R11A (local live updates preserve state):** UsageService.onRecorded in src/runtime/lifecycle.ts now calls the new coalesced UsageDashboard.notifyRecorded() instead of the resetting efresh(). Local bursts share one efreshPreservingState() render on the same ~1.5s cadence as the cross-window watcher; period/project/model/search and selected Task/Chat/Overhead state are preserved. open() on an existing panel reconciles via efreshPreservingState() instead of resetting to defaults.
+- **R11A (local live updates preserve state):** UsageService.onRecorded in src/runtime/lifecycle.ts now calls the new coalesced UsageDashboard.notifyRecorded() instead of the resetting 
+efresh(). Local bursts share one 
+efreshPreservingState() render on the same ~1.5s cadence as the cross-window watcher; period/project/model/search and selected Task/Chat/Overhead state are preserved. open() on an existing panel reconciles via 
+efreshPreservingState() instead of resetting to defaults.
 - **R11B (debounce retention):** added pure 
 extRefreshDecision() in src/usage/dashboard.ts; pollSignature() retains a changed signature as pendingSignature during the holdoff instead of acknowledging it, then refreshes on a later poll even with no further writes. The acknowledged signature advances only on a successful render. Regression test covers change-inside-debounce followed by a quiet later poll.
 - **R11C (sanitizer echo):** sanitizePromptText() now strips <userRequest>/<user_query> wrappers first and only recovers wrapper inner text when nothing real remains; Fix the tests <context/> <userRequest>Fix the tests</userRequest> yields one copy, wrapper-only prompts still recover inner text. Context-only behavior unchanged.
@@ -844,3 +848,35 @@ After R12A/R12B:
 - complete the remaining cross-window auto-sync/filter/expanded-card checks from Review 05.
 
 Do not merge until this live retest passes.
+
+## Review Repair 03 — R12 disposition (2026-09-25, same branch)
+
+All R12 findings repaired in scope; revalidation complete.
+
+- **R12A (reminderInstructions strip):** `sanitizePromptText()` in `src/usage/context.ts`
+  now strips Copilot's camel-case `<reminderInstructions>...</reminderInstructions>`
+  blocks case-insensitively (plus hyphen/underscore variants defensively, paired
+  blocks first, then orphan/self-closing tags). Task detection and 160-char preview
+  generation therefore see the real human prompt; a message reducing to reminder
+  scaffolding only is never a substantive turn and never creates a task.
+- **R12B (explicit local subject):** Local Chat cards now carry an explicit
+  **Local subject** label in the collapsed card and a `Local subject: ...` heading
+  plus `localSubjectNote` in expanded chat detail, clearly distinguished from the
+  native Copilot session title. The subject derives from the first cleaned human
+  task preview and stays stable for the chat lifetime (only an empty/placeholder
+  subject is ever filled; later tasks never rewrite it). New en/zh strings
+  `usage.dashboard.subject`, `usage.dashboard.localSubject`, and
+  `usage.dashboard.localSubjectNote`; README en/zh document the local-subject
+  semantics.
+- **Tests:** `npm test` 44/44 pass (10 suites): 42 pre-existing plus R12A
+  strip/reminder-only and R12B subject-wiring regression cases.
+- **Checks:** `npm run compile` pass; `npm run lint` 0/0 (67 files); source
+  formatter check clean (`src/usage/context.ts`, `src/usage/dashboard.ts`,
+  `src/usage/recorder.ts`, `src/i18n.ts`). `test/usage.test.cjs` was already
+  failing the repo formatter at baseline (verified via stash), so its churn is
+  limited to the minimal R12 addition. `npm run package` rebuilt
+  `dist/meta-spark-for-copilot-2.2.0.vsix` (83 files, 397.28 KB), SHA256
+  `BCD93AAA4D47C0CBE877956FCA0898A32EEAEAD4AFEBE1B81BB81D27ACC3283B`;
+  `vsce ls` confirms test artifacts stay out of the VSIX.
+  ACTIVE returned to COMPLETE - PENDING REVIEW; branch pushed and verified in
+  sync with remote. Live smoke retest still required before merge.

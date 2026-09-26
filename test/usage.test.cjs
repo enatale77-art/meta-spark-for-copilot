@@ -23,11 +23,7 @@ const {
 	serializeMarkerPayload,
 	sanitizePromptText,
 } = require('../out/usage/context.js');
-const {
-	usageSignatureChanged,
-	shouldRefreshSignature,
-	nextRefreshDecision,
-} = (() => {
+const { usageSignatureChanged, shouldRefreshSignature, nextRefreshDecision } = (() => {
 	const Module = require('node:module');
 	const { join } = require('node:path');
 	const stubPath = join(__dirname, 'vscode-stub.cjs');
@@ -80,7 +76,13 @@ function markerHolder(chatId, taskId) {
 		hasTerminalNotification: false,
 		hasControlUpdate: false,
 		hasValidMarker: true,
-		latestValidMarker: { valid: true, chatId, taskId, version: 1, writer: 'meta-spark-for-copilot' },
+		latestValidMarker: {
+			valid: true,
+			chatId,
+			taskId,
+			version: 1,
+			writer: 'meta-spark-for-copilot',
+		},
 		hasToolResultOnly: false,
 		partCount: 1,
 	};
@@ -273,7 +275,11 @@ describe('correlation', () => {
 		const taskId = randomUUID();
 		const marker = { valid: true, chatId, taskId, version: 1, writer: 'meta-spark-for-copilot' };
 		const allocation = allocateUsageContext({
-			messages: [userText('First task'), markerHolder(chatId, taskId), userText('Now do something else')],
+			messages: [
+				userText('First task'),
+				markerHolder(chatId, taskId),
+				userText('Now do something else'),
+			],
 			requestKind: 'main-agent',
 			marker,
 			projectId: 'project-1',
@@ -301,7 +307,13 @@ describe('correlation', () => {
 	});
 
 	it('terminal/background/control requests do not create a new task; missing marker means unassigned', () => {
-		for (const kind of ['terminal-steering', 'todo-tracker', 'chat-title', 'git-commit-message', 'background']) {
+		for (const kind of [
+			'terminal-steering',
+			'todo-tracker',
+			'chat-title',
+			'git-commit-message',
+			'background',
+		]) {
 			assert.equal(isUtilityRequestKind(kind) || kind === 'background', true);
 			const allocation = allocateUsageContext({
 				messages: [userText('background work')],
@@ -320,7 +332,13 @@ describe('correlation', () => {
 		const chatId = randomUUID();
 		const taskId = randomUUID();
 		const marker = { valid: true, chatId, taskId, version: 1, writer: 'meta-spark-for-copilot' };
-		for (const kind of ['terminal-steering', 'todo-tracker', 'chat-title', 'git-commit-message', 'background']) {
+		for (const kind of [
+			'terminal-steering',
+			'todo-tracker',
+			'chat-title',
+			'git-commit-message',
+			'background',
+		]) {
 			const inherited = allocateUsageContext({
 				messages: [userText('task work'), markerHolder(chatId, taskId)],
 				requestKind: kind,
@@ -355,9 +373,22 @@ describe('correlation', () => {
 		assert.equal(parsed.chatId, chatId.toLowerCase());
 		assert.equal(parsed.taskId, taskId.toLowerCase());
 		assert.equal(parseMarkerPayload('not-json').valid, false);
-		assert.equal(parseMarkerPayload(JSON.stringify({ version: 2, writer: 'meta-spark-for-copilot', chatId, taskId })).valid, false);
-		assert.equal(parseMarkerPayload(JSON.stringify({ version: 1, writer: 'other', chatId, taskId })).valid, false);
-		assert.equal(parseMarkerPayload(JSON.stringify({ version: 1, writer: 'meta-spark-for-copilot', chatId: 'bad', taskId })).valid, false);
+		assert.equal(
+			parseMarkerPayload(
+				JSON.stringify({ version: 2, writer: 'meta-spark-for-copilot', chatId, taskId }),
+			).valid,
+			false,
+		);
+		assert.equal(
+			parseMarkerPayload(JSON.stringify({ version: 1, writer: 'other', chatId, taskId })).valid,
+			false,
+		);
+		assert.equal(
+			parseMarkerPayload(
+				JSON.stringify({ version: 1, writer: 'meta-spark-for-copilot', chatId: 'bad', taskId }),
+			).valid,
+			false,
+		);
 	});
 });
 
@@ -386,10 +417,7 @@ describe('project identity and previews', () => {
 			normalizePreview('<context>ctx</context><userRequest>Fix the tests</userRequest>'),
 			'Fix the tests',
 		);
-		assert.equal(
-			normalizePreview('<user_query>Fix the tests</user_query>'),
-			'Fix the tests',
-		);
+		assert.equal(normalizePreview('<user_query>Fix the tests</user_query>'), 'Fix the tests');
 	});
 
 	it('context-only Copilot message after a marker is not a new task', () => {
@@ -409,6 +437,47 @@ describe('project identity and previews', () => {
 		});
 		assert.equal(allocation.taskId, taskId);
 		assert.equal(allocation.isNewTask, false);
+	});
+
+	it('R12A: reminderInstructions scaffolding stripped; reminder-only never a task', () => {
+		const mixed =
+			'<reminderInstructions>When using tools, be careful</reminderInstructions>' +
+			'<context>repo</context><userRequest>Checkout or sync the branch</userRequest>';
+		assert.equal(normalizePreview(mixed), 'Checkout or sync the branch');
+		const solo = '<reminderInstructions>When using tools, be careful</reminderInstructions>';
+		assert.equal(sanitizePromptText(solo).trim(), '');
+		const rChat = randomUUID();
+		const rTask = randomUUID();
+		const rMarker = {
+			valid: true,
+			chatId: rChat,
+			taskId: rTask,
+			version: 1,
+			writer: 'meta-spark-for-copilot',
+		};
+		const reminderOnly =
+			'<reminderInstructions>When using tools, be careful</reminderInstructions>';
+		const rAlloc = allocateUsageContext({
+			messages: [userText('Real prompt'), markerHolder(rChat, rTask), userText(reminderOnly)],
+			requestKind: 'main-agent',
+			marker: rMarker,
+			projectId: 'project-1',
+			projectName: 'Demo',
+		});
+		assert.equal(rAlloc.taskId, rTask);
+		assert.equal(rAlloc.isNewTask, false);
+	});
+
+	it('R12B: chat cards expose explicit local subject distinct from native title', () => {
+		const fs = require('node:fs');
+		const path = require('node:path');
+		const dashboard = fs.readFileSync(
+			path.join(__dirname, '..', 'src', 'usage', 'dashboard.ts'),
+			'utf8',
+		);
+		const i18n = fs.readFileSync(path.join(__dirname, '..', 'src', 'i18n.ts'), 'utf8');
+		assert.ok(i18n.includes("'usage.dashboard.localSubject'"));
+		assert.ok(dashboard.includes("t('usage.dashboard.localSubject')"));
 	});
 });
 
@@ -504,7 +573,10 @@ describe('persistence', () => {
 				readdir: async () => [],
 				isNotFound: () => false,
 			};
-			const store = createFileUsageStore({ fsPath: '/virtual-usage', scheme: 'file' }, { nodeFs: unreadableFs });
+			const store = createFileUsageStore(
+				{ fsPath: '/virtual-usage', scheme: 'file' },
+				{ nodeFs: unreadableFs },
+			);
 			await assert.rejects(() => store.readRequests(), /EACCES/);
 		} finally {
 			Module._resolveFilename = originalResolve;
@@ -568,9 +640,32 @@ describe('persistence', () => {
 describe('aggregation', () => {
 	it('totals and cache-hit percentage exclude attempts', () => {
 		const records = [
-			makeRecord({ promptTokens: 1000, cachedInputTokens: 500, uncachedInputTokens: 500, completionTokens: 100, totalTokens: 1100, estimatedCostUsd: 0.001 }),
-			makeRecord({ promptTokens: 1000, cachedInputTokens: 0, uncachedInputTokens: 1000, completionTokens: 100, totalTokens: 1100, estimatedCostUsd: 0.002 }),
-			makeRecord({ status: 'attempt', promptTokens: null, cachedInputTokens: null, uncachedInputTokens: null, completionTokens: null, reasoningTokens: null, totalTokens: null, estimatedCostUsd: null }),
+			makeRecord({
+				promptTokens: 1000,
+				cachedInputTokens: 500,
+				uncachedInputTokens: 500,
+				completionTokens: 100,
+				totalTokens: 1100,
+				estimatedCostUsd: 0.001,
+			}),
+			makeRecord({
+				promptTokens: 1000,
+				cachedInputTokens: 0,
+				uncachedInputTokens: 1000,
+				completionTokens: 100,
+				totalTokens: 1100,
+				estimatedCostUsd: 0.002,
+			}),
+			makeRecord({
+				status: 'attempt',
+				promptTokens: null,
+				cachedInputTokens: null,
+				uncachedInputTokens: null,
+				completionTokens: null,
+				reasoningTokens: null,
+				totalTokens: null,
+				estimatedCostUsd: null,
+			}),
 		];
 		const totals = aggregateRequests(records);
 		assert.equal(totals.requests, 3);
@@ -609,9 +704,39 @@ describe('aggregation', () => {
 
 	it('unassigned overhead groups by kind and excludes task records', () => {
 		const records = [
-			makeRecord({ chatId: null, taskId: null, requestKind: 'chat-title', promptTokens: 100, cachedInputTokens: 10, uncachedInputTokens: 90, completionTokens: 5, totalTokens: 105, estimatedCostUsd: 0.001 }),
-			makeRecord({ chatId: null, taskId: null, requestKind: 'chat-title', promptTokens: 200, cachedInputTokens: 20, uncachedInputTokens: 180, completionTokens: 10, totalTokens: 210, estimatedCostUsd: 0.002 }),
-			makeRecord({ chatId: 'chat-a', taskId: 'task-a', requestKind: 'main-agent', promptTokens: 300, cachedInputTokens: 30, uncachedInputTokens: 270, completionTokens: 15, totalTokens: 315, estimatedCostUsd: 0.003 }),
+			makeRecord({
+				chatId: null,
+				taskId: null,
+				requestKind: 'chat-title',
+				promptTokens: 100,
+				cachedInputTokens: 10,
+				uncachedInputTokens: 90,
+				completionTokens: 5,
+				totalTokens: 105,
+				estimatedCostUsd: 0.001,
+			}),
+			makeRecord({
+				chatId: null,
+				taskId: null,
+				requestKind: 'chat-title',
+				promptTokens: 200,
+				cachedInputTokens: 20,
+				uncachedInputTokens: 180,
+				completionTokens: 10,
+				totalTokens: 210,
+				estimatedCostUsd: 0.002,
+			}),
+			makeRecord({
+				chatId: 'chat-a',
+				taskId: 'task-a',
+				requestKind: 'main-agent',
+				promptTokens: 300,
+				cachedInputTokens: 30,
+				uncachedInputTokens: 270,
+				completionTokens: 15,
+				totalTokens: 315,
+				estimatedCostUsd: 0.003,
+			}),
 		];
 		const overhead = rollupUnassignedOverhead(records);
 		assert.equal(overhead.requests, 2);
@@ -628,8 +753,22 @@ describe('status selection', () => {
 		const projectA = deriveProjectId(['file:///a']).projectId;
 		const projectB = deriveProjectId(['file:///b']).projectId;
 		const records = [
-			makeRecord({ projectId: projectB, projectName: 'B', taskId: 'task-b', chatId: 'chat-b', timestampMs: now, taskPreview: 'Other project' }),
-			makeRecord({ projectId: projectA, projectName: 'A', taskId: 'task-a', chatId: 'chat-a', timestampMs: now - 1000, taskPreview: 'Active project' }),
+			makeRecord({
+				projectId: projectB,
+				projectName: 'B',
+				taskId: 'task-b',
+				chatId: 'chat-b',
+				timestampMs: now,
+				taskPreview: 'Other project',
+			}),
+			makeRecord({
+				projectId: projectA,
+				projectName: 'A',
+				taskId: 'task-a',
+				chatId: 'chat-a',
+				timestampMs: now - 1000,
+				taskPreview: 'Active project',
+			}),
 		];
 		const selected = selectStatusTask({ records, workspaceUris: ['file:///a'], nowMs: now });
 		assert.equal(selected.projectId, projectA);
@@ -641,7 +780,13 @@ describe('status selection', () => {
 		const now = Date.now();
 		const projectB = deriveProjectId(['file:///b']).projectId;
 		const records = [
-			makeRecord({ projectId: projectB, projectName: 'B', taskId: 'task-b', chatId: 'chat-b', timestampMs: now }),
+			makeRecord({
+				projectId: projectB,
+				projectName: 'B',
+				taskId: 'task-b',
+				chatId: 'chat-b',
+				timestampMs: now,
+			}),
 		];
 		const selected = selectStatusTask({ records, workspaceUris: ['file:///a'], nowMs: now });
 		assert.equal(selected.latest, undefined);
@@ -679,9 +824,19 @@ describe('synthetic provider-level sequence', () => {
 		assert.ok(first.chatId && first.taskId);
 
 		// 2-3. multiple usage callbacks + tool continuation retain the task
-		const marker = { valid: true, chatId: first.chatId, taskId: first.taskId, version: 1, writer: 'meta-spark-for-copilot' };
+		const marker = {
+			valid: true,
+			chatId: first.chatId,
+			taskId: first.taskId,
+			version: 1,
+			writer: 'meta-spark-for-copilot',
+		};
 		const continued = allocateUsageContext({
-			messages: [userText('Implement feature X'), markerHolder(marker.chatId, marker.taskId), toolOnly()],
+			messages: [
+				userText('Implement feature X'),
+				markerHolder(marker.chatId, marker.taskId),
+				toolOnly(),
+			],
 			requestKind: 'main-agent',
 			marker,
 			projectId: 'project-1',
@@ -691,7 +846,11 @@ describe('synthetic provider-level sequence', () => {
 
 		// 4. new human prompt creates a second task under the same chat
 		const second = allocateUsageContext({
-			messages: [userText('Implement feature X'), markerHolder(marker.chatId, marker.taskId), userText('Now fix the docs')],
+			messages: [
+				userText('Implement feature X'),
+				markerHolder(marker.chatId, marker.taskId),
+				userText('Now fix the docs'),
+			],
 			requestKind: 'main-agent',
 			marker,
 			projectId: 'project-1',
@@ -712,16 +871,55 @@ describe('synthetic provider-level sequence', () => {
 
 		// 6-7. dashboard rollups equal ledger totals; export rows equal ledger
 		const ledger = [
-			makeRecord({ chatId: first.chatId, taskId: first.taskId, promptTokens: 100, cachedInputTokens: 10, uncachedInputTokens: 90, completionTokens: 10, totalTokens: 110, estimatedCostUsd: 0.001 }),
-			makeRecord({ chatId: first.chatId, taskId: first.taskId, promptTokens: 200, cachedInputTokens: 20, uncachedInputTokens: 180, completionTokens: 20, totalTokens: 220, estimatedCostUsd: 0.002 }),
-			makeRecord({ chatId: second.chatId, taskId: second.taskId, promptTokens: 300, cachedInputTokens: 30, uncachedInputTokens: 270, completionTokens: 30, totalTokens: 330, estimatedCostUsd: 0.003 }),
-			makeRecord({ chatId: null, taskId: null, promptTokens: 50, cachedInputTokens: 0, uncachedInputTokens: 50, completionTokens: 5, totalTokens: 55, estimatedCostUsd: 0.0005 }),
+			makeRecord({
+				chatId: first.chatId,
+				taskId: first.taskId,
+				promptTokens: 100,
+				cachedInputTokens: 10,
+				uncachedInputTokens: 90,
+				completionTokens: 10,
+				totalTokens: 110,
+				estimatedCostUsd: 0.001,
+			}),
+			makeRecord({
+				chatId: first.chatId,
+				taskId: first.taskId,
+				promptTokens: 200,
+				cachedInputTokens: 20,
+				uncachedInputTokens: 180,
+				completionTokens: 20,
+				totalTokens: 220,
+				estimatedCostUsd: 0.002,
+			}),
+			makeRecord({
+				chatId: second.chatId,
+				taskId: second.taskId,
+				promptTokens: 300,
+				cachedInputTokens: 30,
+				uncachedInputTokens: 270,
+				completionTokens: 30,
+				totalTokens: 330,
+				estimatedCostUsd: 0.003,
+			}),
+			makeRecord({
+				chatId: null,
+				taskId: null,
+				promptTokens: 50,
+				cachedInputTokens: 0,
+				uncachedInputTokens: 50,
+				completionTokens: 5,
+				totalTokens: 55,
+				estimatedCostUsd: 0.0005,
+			}),
 		];
 		const totals = aggregateRequests(ledger);
 		assert.equal(totals.inputTokens, 650);
 		assert.equal(totals.requests, 4);
 		const tasks = rollupTasks(ledger);
-		assert.equal(tasks.reduce((sum, task) => sum + task.requests, 0), 3);
+		assert.equal(
+			tasks.reduce((sum, task) => sum + task.requests, 0),
+			3,
+		);
 		const csvLines = toCsvText(ledger).split('\r\n').filter(Boolean);
 		assert.equal(csvLines.length, ledger.length + 1);
 	});
@@ -783,7 +981,10 @@ describe('unified stateful marker (R7)', () => {
 		const decoded = new TextDecoder().decode(bytes);
 		const responseId = decoded.slice(decoded.indexOf('\\') + 1);
 		const rebuilt = new TextEncoder().encode(`${modelId}\\${responseId}`);
-		const parsed = marker.parseStatefulUsageMarkerPart({ mimeType: 'stateful_marker', data: rebuilt });
+		const parsed = marker.parseStatefulUsageMarkerPart({
+			mimeType: 'stateful_marker',
+			data: rebuilt,
+		});
 		assert.equal(parsed?.valid, true);
 		assert.equal(parsed?.chatId, chatId.toLowerCase());
 		assert.equal(parsed?.taskId, taskId.toLowerCase());
@@ -835,8 +1036,14 @@ describe('unified stateful marker (R7)', () => {
 	it('no meta-spark-usage-context marker is emitted by the provider path', () => {
 		const fs = require('node:fs');
 		const path = require('node:path');
-		const providerIndex = fs.readFileSync(path.join(__dirname, '..', 'src', 'provider', 'index.ts'), 'utf8');
-		const stream = fs.readFileSync(path.join(__dirname, '..', 'src', 'provider', 'stream.ts'), 'utf8');
+		const providerIndex = fs.readFileSync(
+			path.join(__dirname, '..', 'src', 'provider', 'index.ts'),
+			'utf8',
+		);
+		const stream = fs.readFileSync(
+			path.join(__dirname, '..', 'src', 'provider', 'stream.ts'),
+			'utf8',
+		);
 		assert.ok(!providerIndex.includes('createUsageMarkerPart'));
 		assert.ok(!providerIndex.includes('meta-spark-usage-context'));
 		assert.ok(!stream.includes('usageMarker'));
@@ -846,7 +1053,13 @@ describe('unified stateful marker (R7)', () => {
 	it('two prompts in one stateful chain make one chat with two tasks; tool loop stays put', () => {
 		const chatId = randomUUID();
 		const firstTask = randomUUID();
-		const marker = { valid: true, chatId, taskId: firstTask, version: 1, writer: 'meta-spark-for-copilot' };
+		const marker = {
+			valid: true,
+			chatId,
+			taskId: firstTask,
+			version: 1,
+			writer: 'meta-spark-for-copilot',
+		};
 		const loop = allocateUsageContext({
 			messages: [userText('First'), markerHolder(chatId, firstTask), toolOnly()],
 			requestKind: 'main-agent',
@@ -903,7 +1116,9 @@ describe('cross-window sync signatures (R10)', () => {
 
 	it('R11C: leading prompt plus echoed wrapper yields one copy; wrapper-only recovers inner text', () => {
 		assert.equal(
-			normalizePreview('Fix the tests\n<context>x</context>\n<userRequest>Fix the tests</userRequest>'),
+			normalizePreview(
+				'Fix the tests\n<context>x</context>\n<userRequest>Fix the tests</userRequest>',
+			),
 			'Fix the tests',
 		);
 		assert.equal(normalizePreview('<userRequest>Fix the tests</userRequest>'), 'Fix the tests');

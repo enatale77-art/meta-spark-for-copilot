@@ -50,7 +50,7 @@ Local-first per-task Muse usage accounting, captured from Meta's returned usage 
 
 What is stored locally (under `<globalStorageUri>/usage-v1/` as `requests.jsonl` + `contexts.json`): timestamps, project/chat/task IDs, model IDs, request kind/initiator, reasoning effort, token counts (prompt, cached, uncached, completion, reasoning, total), estimated USD cost + pricing source, duration, status, and a capped 160-character task preview. Full prompts, source files, tool arguments/results, reasoning/response text, request/response bodies, filesystem paths, and API keys are never stored. Costs are estimates from the extension's `MODELS` catalog, not billing invoices.
 
-Local Chat IDs and Task IDs are owned by this extension for grouping (hierarchy: Request → Task → Local Chat → Project). A Local Chat ID is not GitHub Copilot's native session ID, and v1 cannot deep-link to the exact native Copilot chat. Uncorrelated utility/background requests are recorded as unassigned Copilot overhead rather than guessed into a chat.
+Local Chat IDs and Task IDs are owned by this extension for grouping (hierarchy: Request → Task → Local Chat → Project). A Local Chat ID is not GitHub Copilot's native session ID, and v1 cannot deep-link to the exact native Copilot chat. Each Local Chat card shows an explicit local Subject derived from the first cleaned human task preview (stable for the chat lifetime); it is not the native Copilot session title. Uncorrelated utility/background requests are recorded as unassigned Copilot overhead rather than guessed into a chat.
 
 ## Pricing and limits
 
