@@ -2,7 +2,11 @@
 README.md
 README.zh-cn.md
 src/**
+test/**
+scripts/**
 docs/**
+ACTIVE.md
+*.code-workspace
 out/**/*.map
 out/**/*.d.ts
 out/**/*.d.ts.map

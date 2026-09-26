@@ -27,6 +27,8 @@ export interface PreparedChatRequest {
 	replayMarkerMetadata: ReplayMarkerMetadata;
 	visionMarkerTextChars?: number;
 	initialResponseNotice?: string;
+	vscodeModelId: string;
+	usageCorrelation?: { chatId: string; taskId: string };
 }
 
 export interface PrepareChatRequestOptions {
@@ -39,6 +41,7 @@ export interface PrepareChatRequestOptions {
 	token: vscode.CancellationToken;
 	cacheDiagnostics: CacheDiagnosticsRecorder;
 	getVisionDescriber: () => Promise<VisionDescriber | undefined>;
+	usageCorrelation?: { chatId: string; taskId: string };
 }
 
 export async function prepareChatRequest({
@@ -51,6 +54,7 @@ export async function prepareChatRequest({
 	token,
 	cacheDiagnostics,
 	getVisionDescriber,
+	usageCorrelation,
 }: PrepareChatRequestOptions): Promise<PreparedChatRequest> {
 	const apiKey = await authManager.getApiKey();
 	if (!apiKey) {
@@ -89,12 +93,11 @@ export async function prepareChatRequest({
 		shouldForceMinimalThinking(requestKind) && isOfficialMetaBaseUrl(baseUrl);
 	// The `max` reasoning effort is only available on Standard-tier muse-spark-1.3.
 	// Clamp it to `xhigh` for models that do not support it.
-	const thinkingEffort =
-		forceMinimalThinking
-			? 'minimal'
-			: configuredThinkingEffort === 'max' && modelDef?.supportsMaxReasoningEffort !== true
-				? 'xhigh'
-				: configuredThinkingEffort;
+	const thinkingEffort = forceMinimalThinking
+		? 'minimal'
+		: configuredThinkingEffort === 'max' && modelDef?.supportsMaxReasoningEffort !== true
+			? 'xhigh'
+			: configuredThinkingEffort;
 	const request: MetaRequest = {
 		...baseRequest,
 		...(isThinkingModel
@@ -146,5 +149,7 @@ export async function prepareChatRequest({
 		replayMarkerMetadata: visionResolution.replayMarkerMetadata,
 		visionMarkerTextChars: visionResolution.stats.markerVisionTextChars || undefined,
 		initialResponseNotice: visionResolution.initialResponseNotice,
+		vscodeModelId: modelInfo.id,
+		usageCorrelation,
 	};
 }

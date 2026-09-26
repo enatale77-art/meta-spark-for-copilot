@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.2.0
+
+### Features
+
+- **Muse per-task usage monitor** — local-first accounting from Meta's returned `MetaUsage` object: requests, input/cached/uncached/output/reasoning/total tokens, cache-hit %, and estimated USD cost at request, task, local-chat, and project levels
+- **Usage Dashboard** (`Meta Spark: Open Usage Dashboard`) — local webview with 7d/30d/90d/All + project/model filters, task rollups, request timeline drill-down, local-chat roll-up, and copyable IDs; no remote JS/CSS
+- **CSV export** (`Meta Spark: Export Usage CSV`) — request-granularity rows with IDs, capped 160-char preview, token fields, and cost; no prompts beyond the preview, no paths, no keys
+- **Status bar** — compact most-recent-task summary for the active workspace (configurable via `meta-spark-copilot.usageMonitor.statusBar`), tooltip with IDs, click opens the dashboard
+- **Clear history** (`Meta Spark: Clear Usage History`) — confirmation-gated, deletes only `usage-v1` data
+- Extension-owned `chat_id`/`task_id` correlation via a hidden versioned `LanguageModelDataPart` marker; uncorrelated utility/background calls land in unassigned Copilot overhead rather than guessed chats
+
+### Notes
+
+- **Minor release (2.2.0)**: additive usage-monitor feature; existing models and settings are unchanged.
+- Usage data stays local under `<globalStorageUri>/usage-v1/` (`requests.jsonl` + `contexts.json`). Costs are estimates from the extension's `MODELS` catalog, not billing invoices. Local Chat IDs are extension-owned; v1 cannot deep-link to the exact native Copilot chat.
+
 ## 2.1.0
 
 ### Features

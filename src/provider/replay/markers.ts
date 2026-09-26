@@ -14,6 +14,8 @@ import type {
 	ReplayMarkerMetadata,
 	ReplayMarkerParseResult,
 	ReplayMarkerPayloadFormat,
+	UsageCorrelationMetadata,
+	UsageMarkerTextIgnoredReason,
 	VisionMarkerTextIgnoredReason,
 } from './types';
 
@@ -46,18 +48,26 @@ function parseReplayMarkerPart(part: unknown): ReplayMarkerParseResult | undefin
 }
 
 export function hasReplayMarkerMetadata(metadata: ReplayMarkerMetadata): boolean {
-	return Boolean(metadata.visionText || metadata.reasoningText);
+	return Boolean(
+		metadata.visionText ||
+		metadata.reasoningText ||
+		metadata.usage?.chatId ||
+		metadata.usage?.taskId,
+	);
 }
 
 export function createReplayMarkerPart(
 	metadata: ReplayMarkerMetadata,
+	prefix?: string,
 ): vscode.LanguageModelDataPart {
 	const payload = encodeReplayMarkerJson({
 		...createVisionMarkerPayload(metadata.visionText),
 		...createReasoningMarkerPayload(metadata.reasoningText),
+		...createUsageMarkerPayload(metadata.usage),
 	});
+	const writerPrefix = prefix && prefix.length > 0 ? prefix : REPLAY_MARKER_WRITER_ID;
 	return new vscode.LanguageModelDataPart(
-		new TextEncoder().encode(`${REPLAY_MARKER_WRITER_ID}\\${payload}`),
+		new TextEncoder().encode(`${writerPrefix}\\${payload}`),
 		REPLAY_MARKER_MIME,
 	);
 }
@@ -103,12 +113,19 @@ export function parseReplayMarkerData(data: Uint8Array): ReplayMarkerParseResult
 
 		const vision = parseVisionMarkerMetadata(value);
 		const reasoning = parseReasoningMarkerMetadata(value);
+		const usage = parseUsageMarkerMetadata(value);
 		return {
 			valid: true,
 			segmentId: segmentId.value,
 			...vision,
 			...reasoning,
-			legacySegmentOnly: Boolean(segmentId.value && !vision.visionText && !reasoning.reasoningText),
+			...(usage.usageChatId || usage.usageTaskId
+				? { usageChatId: usage.usageChatId, usageTaskId: usage.usageTaskId }
+				: {}),
+			...(usage.usageIgnoredReason ? { usageIgnoredReason: usage.usageIgnoredReason } : {}),
+			legacySegmentOnly: Boolean(
+				segmentId.value && !vision.visionText && !reasoning.reasoningText && !usage.usageChatId,
+			),
 			payloadFormat: decodedPayload.format,
 		};
 	} catch {
@@ -162,6 +179,51 @@ function parseVisionMarkerMetadata(value: object): {
 
 function createReasoningMarkerPayload(reasoningText: string | undefined): object {
 	return reasoningText ? { reasoning: { text: reasoningText } } : {};
+}
+
+function createUsageMarkerPayload(usage: UsageCorrelationMetadata | undefined): object {
+	if (!usage?.chatId || !usage?.taskId) {
+		return {};
+	}
+	return {
+		usage: {
+			version: 1,
+			writer: 'meta-spark-for-copilot',
+			chatId: usage.chatId,
+			taskId: usage.taskId,
+		},
+	};
+}
+
+function parseUsageMarkerMetadata(value: object): {
+	usageChatId?: string;
+	usageTaskId?: string;
+	usageIgnoredReason?: UsageMarkerTextIgnoredReason;
+} {
+	const usage = (value as { usage?: unknown }).usage;
+	if (usage === undefined) {
+		return {};
+	}
+	if (!usage || typeof usage !== 'object' || Array.isArray(usage)) {
+		return { usageIgnoredReason: 'usage-not-object' };
+	}
+	const record = usage as Record<string, unknown>;
+	if (record.version !== 1) {
+		return { usageIgnoredReason: 'usage-version-mismatch' };
+	}
+	if (record.writer !== 'meta-spark-for-copilot') {
+		return { usageIgnoredReason: 'usage-writer-mismatch' };
+	}
+	if (typeof record.chatId !== 'string' || !LEGACY_SEGMENT_ID_PATTERN.test(record.chatId)) {
+		return { usageIgnoredReason: 'usage-chat-id-invalid' };
+	}
+	if (typeof record.taskId !== 'string' || !LEGACY_SEGMENT_ID_PATTERN.test(record.taskId)) {
+		return { usageIgnoredReason: 'usage-task-id-invalid' };
+	}
+	return {
+		usageChatId: (record.chatId as string).toLowerCase(),
+		usageTaskId: (record.taskId as string).toLowerCase(),
+	};
 }
 
 function parseReasoningMarkerMetadata(value: object): {

@@ -81,6 +81,20 @@ Agent 模式、工具调用（文件编辑、终端等）、自定义 Instructio
 | `meta-spark-copilot.modelIdOverrides` | 官方 ID | 兼容第三方 API 时覆盖模型 ID |
 | `meta-spark-copilot.debugMode` | `minimal` | 诊断模式：`minimal` / `metadata` / `verbose` |
 | `meta-spark-copilot.experimental.stabilizeToolList` | `false` | 实验性：稳定工具列表以提升缓存命中率 |
+| `meta-spark-copilot.usageMonitor.statusBar` | `true` | 在状态栏显示 Muse 用量摘要 |
+
+## 用量监控
+
+本地优先的按任务 Muse 用量统计，直接取自 Meta 返回的 usage 对象——无代理、无云同步、无遥测。
+
+- 命令面板 → **Meta Spark: 打开用量看板**——汇总卡片（请求数、输入、缓存、输出、缓存命中率、预估费用）、7d/30d/90d/全部 + 项目/模型过滤、任务聚合与请求时间线及请求类型分解、本地会话聚合、可复制 ID。
+- 命令面板 → **Meta Spark: 导出用量 CSV**——按请求粒度导出到你选择的位置。
+- 命令面板 → **Meta Spark: 清除用量历史**——需二次确认，仅删除用量监控数据。
+- 状态栏显示当前工作区最近跟踪任务的摘要（请求/token/费用），点击打开看板。可通过 `meta-spark-copilot.usageMonitor.statusBar` 关闭。
+
+本地存储（`<globalStorageUri>/usage-v1/` 下的 `requests.jsonl` + `contexts.json`）：时间戳、项目/会话/任务 ID、模型 ID、请求类型/发起方、推理强度、token 数（prompt、缓存、未缓存、补全、推理、总计）、预估 USD 费用与定价来源、耗时、状态，以及最多 160 字符的任务预览。完整提示词、源文件、工具参数/结果、推理/响应文本、请求/响应体、文件系统路径、API Key 永不存储。费用为基于扩展 `MODELS` 目录的估算，不是账单。
+
+本地会话 ID 与任务 ID 由本扩展生成用于归组（层级：请求 → 任务 → 本地会话 → 项目）。本地会话 ID 不是 GitHub Copilot 原生会话 ID，v1 无法深链到原生 Copilot 会话。每个本地会话卡片显示明确的本地主题（取自该会话首个已清理的人类任务预览，在会话生命周期内保持稳定），它不是原生 Copilot 会话标题。无关联的工具/后台请求记为未归属的 Copilot 开销，不会猜测归入某个会话。
 
 ## 定价
 
@@ -134,7 +148,7 @@ npm run package
 
 - 版本为手动管理。扩展版本号位于 `package.json`（`version`）。完整指南见 `docs/RELEASE.md`。
 - 新增模型检查点 / 档位 / 能力等（相当于 `feat:`）提升**次版本**；设置或模型 ID 的破坏性变更提升**主版本**；小修复（相当于 `fix:`）提升**修订版本**。
-- 本次为 **2.1.0**（次版本）：新增 Muse Spark 1.3、1.3 贡献者档位与 `max` 推理强度，不破坏既有模型或设置。
+- 本次为 **2.2.0**（次版本）：新增本地优先的 Muse 按任务用量监控（看板、CSV 导出、状态栏、清除历史），不破坏既有模型或设置。
 - 发布流程：提升 `package.json` 中的 `version`，在 `CHANGELOG.md` 添加条目，运行 `npm run package` 构建并测试，再用 `vsce` / `ovsx` 发布并在 GitHub 打上发布标签。
 
 ## 许可证

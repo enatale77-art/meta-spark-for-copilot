@@ -1,3 +1,8 @@
+export interface UsageCorrelationMetadata {
+	chatId?: string;
+	taskId?: string;
+}
+
 export interface ReplayMarkerParseResult {
 	valid: boolean;
 	segmentId?: string;
@@ -5,6 +10,9 @@ export interface ReplayMarkerParseResult {
 	visionTextIgnoredReason?: VisionMarkerTextIgnoredReason;
 	reasoningText?: string;
 	reasoningTextIgnoredReason?: ReasoningMarkerTextIgnoredReason;
+	usageChatId?: string;
+	usageTaskId?: string;
+	usageIgnoredReason?: UsageMarkerTextIgnoredReason;
 	legacySegmentOnly?: boolean;
 	payloadFormat?: ReplayMarkerPayloadFormat;
 	error?: string;
@@ -27,7 +35,15 @@ export type ReasoningMarkerTextIgnoredReason =
 	| 'reasoning-text-not-string'
 	| 'reasoning-text-empty';
 
+export type UsageMarkerTextIgnoredReason =
+	| 'usage-not-object'
+	| 'usage-version-mismatch'
+	| 'usage-writer-mismatch'
+	| 'usage-chat-id-invalid'
+	| 'usage-task-id-invalid';
+
 export interface ReplayMarkerMetadata {
 	visionText?: string;
 	reasoningText?: string;
+	usage?: UsageCorrelationMetadata;
 }

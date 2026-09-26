@@ -48,6 +48,11 @@ export function getStabilizeToolListEnabled(): boolean {
 	return config.get<boolean>('experimental.stabilizeToolList', false);
 }
 
+export function getUsageStatusBarEnabled(): boolean {
+	const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
+	return config.get<boolean>('usageMonitor.statusBar', true);
+}
+
 export async function migrateLegacyDebugSetting(): Promise<void> {
 	await migrateLegacyDebugSettingAtScope(vscode.ConfigurationTarget.Global);
 	if (vscode.workspace.workspaceFile || vscode.workspace.workspaceFolders?.length) {

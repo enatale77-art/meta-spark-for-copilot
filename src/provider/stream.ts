@@ -31,6 +31,9 @@ export interface StreamChatCompletionOptions {
 	initialResponseNotice?: string;
 	getCharsPerToken: () => number;
 	setCharsPerToken: (charsPerToken: number) => void;
+	usageHooks?: {
+		onUsage?: (usage: MetaUsage, info: { durationMs: number }) => void;
+	};
 }
 
 export function streamChatCompletion({
@@ -40,6 +43,7 @@ export function streamChatCompletion({
 	initialResponseNotice,
 	getCharsPerToken,
 	setCharsPerToken,
+	usageHooks,
 }: StreamChatCompletionOptions): Promise<void> {
 	const state: ResponseStreamState = {
 		accumulatedReasoning: '',
@@ -47,6 +51,7 @@ export function streamChatCompletion({
 		initialResponseNoticeReported: false,
 		replayMarkerReported: false,
 	};
+	const streamStartedAtMs = Date.now();
 	const cancelListener = observeCancellationToken(token, prepared.cacheDiagnostics);
 
 	return prepared.client
@@ -91,6 +96,14 @@ export function streamChatCompletion({
 					setCharsPerToken(charsPerToken);
 					prepared.cacheDiagnostics.onUsage(usage, charsPerToken);
 					reportCopilotContextUsage(progress, usage, prepared.requestKind);
+					try {
+						usageHooks?.onUsage?.(usage, { durationMs: Date.now() - streamStartedAtMs });
+					} catch (error) {
+						logger.warn(
+							formatRequestLogLine(prepared.requestKind, 'Failed to record Muse usage'),
+							error,
+						);
+					}
 				},
 			},
 			token,
@@ -177,7 +190,7 @@ function reportReplayMarker(
 	}
 
 	try {
-		const markerPart = createReplayMarkerPart(metadata);
+		const markerPart = createReplayMarkerPart(metadata, prepared.vscodeModelId);
 		progress.report(markerPart);
 		prepared.cacheDiagnostics.onReplayMarkerReport({
 			status: 'reported',
@@ -208,6 +221,14 @@ function getReplayMarkerMetadata(
 	return {
 		...prepared.replayMarkerMetadata,
 		reasoningText: state.accumulatedReasoning || undefined,
+		...(prepared.usageCorrelation?.chatId && prepared.usageCorrelation?.taskId
+			? {
+					usage: {
+						chatId: prepared.usageCorrelation.chatId,
+						taskId: prepared.usageCorrelation.taskId,
+					},
+				}
+			: {}),
 	};
 }
 
