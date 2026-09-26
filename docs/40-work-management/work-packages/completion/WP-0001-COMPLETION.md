@@ -779,3 +779,68 @@ Live PASS criteria:
 7. Dashboard Clear, if exercised after evidence is captured, resets dashboard and status bar immediately and does not resurrect prior chat/task metadata.
 
 If all seven pass, WP-0001 is technically accepted and may proceed directly to routine integration under delegated authority.
+
+
+## Live Copilot Smoke 02 / Engineering Manager Review 06 — 2026-09-25
+
+**Disposition:** PARTIAL PASS / CHANGES REQUIRED — correlation is now working, but human-facing chat/task labeling still leaks Copilot prompt scaffolding and the dashboard does not expose a true/native chat subject.
+
+### Confirmed live improvements
+
+The second live smoke shows the core R7 correlation repair working:
+
+- 27 Muse requests are aggregated into **1 Task**;
+- that Task belongs to **1 Local Chat**;
+- the selected Project filter (`ENAX-Konnect`) is active while usage is displayed;
+- the card-first dashboard is readable and no longer dominated by a wide request table.
+
+This is a major pass for the core accounting/correlation architecture.
+
+### R12A — Strip current Copilot `<reminderInstructions>` scaffolding
+
+**Observed defect:** the Task card and Local Chat card are titled with:
+
+`<reminderInstructions> When using the replace_string_in_file tool, include 3-5 lines of...`
+
+That is Copilot-generated system/reminder content, not the user's prompt.
+
+Current VS Code/Copilot source confirms `reminderInstructions` is a prompt tag rendered beside the user message. Our sanitizer currently removes `<reminder>`, `<system-reminder>`, etc., but not this camel-case tag.
+
+**Required correction:**
+- strip `<reminderInstructions>...</reminderInstructions>` case-insensitively before task detection/preview generation;
+- support obvious hyphen/underscore variants defensively if they appear;
+- preserve the current rule: prefer real leading human text when present; otherwise recover `<userRequest>` / `<user_query>` inner text;
+- add regression tests proving a prompt composed of generated reminder/context blocks plus a userRequest wrapper yields only the actual human prompt;
+- do not create a new task from a message that reduces to reminder/system scaffolding only.
+
+### R12B — Make the Local Chat card explicitly represent a chat subject
+
+**Current behavior:** `ChatMetadata.displayName` is derived from the first task preview. It is a local grouping title, not the native GitHub Copilot chat title. The current dashboard gives no explicit indication of that distinction.
+
+Current VS Code/Copilot source shows native chat/session title generation is owned by VS Code/Copilot itself (for example `AgentHostSessionTitleController` / the Copilot title provider) and may use a separate utility model path. The Language Model provider API does not expose a stable native chat title/session title to this extension. Therefore do not claim an exact native Copilot subject unless it is actually observable and reliably correlated.
+
+**Required UX:**
+1. Give every Local Chat a clear **Subject** (or equivalent) in the card/detail UI.
+2. For v1, derive that local subject from the **first cleaned human task preview** after R12A. This should be short, human-readable, and stable for the life of that Local Chat.
+3. Label/document it as a **local chat subject** (extension-owned), not as the native Copilot title.
+4. If a future/current `chat-title` request is actually observed by this provider **and can be correlated without guessing**, it may be used to improve the local subject. Do not use heuristic cross-chat matching and do not store arbitrary response text merely to chase the native title.
+5. In expanded Local Chat detail, show:
+   - Subject
+   - Project
+   - task count
+   - request count
+   - token/cache/cost rollup
+   - Local Chat ID only in the expanded diagnostic area.
+6. Task cards should continue to show the cleaned task prompt; the Local Chat card should visually identify itself as the chat-level grouping/subject.
+
+### Smoke retest
+
+After R12A/R12B:
+- rebuild/package and record new SHA256;
+- clear old smoke data;
+- run one multi-step prompt and confirm the Task title is the user's prompt, not `reminderInstructions`;
+- confirm the Local Chat card shows a clear local Subject derived from that cleaned first prompt;
+- send a second prompt in the same chat and confirm 2 Tasks / 1 Local Chat while the Local Chat Subject remains stable;
+- complete the remaining cross-window auto-sync/filter/expanded-card checks from Review 05.
+
+Do not merge until this live retest passes.
