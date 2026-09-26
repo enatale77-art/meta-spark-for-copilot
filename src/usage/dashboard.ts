@@ -1,4 +1,4 @@
-import vscode from 'vscode';
+﻿import vscode from 'vscode';
 import {
 	aggregateRequests,
 	filterByTime,
@@ -87,6 +87,63 @@ export function nextRefreshDecision(
 		return { shouldRefresh: true, pending: undefined };
 	}
 	return { shouldRefresh: false, pending: current };
+}
+
+/**
+ * DC-R1: serializes the effective server-rendered selection into the inline
+ * webview script so a fresh document (after any `webview.html` replacement)
+ * starts with the same expanded chat/task/overhead state the user sees.
+ *
+ * Values are JSON-encoded (never raw-interpolated), so untrusted IDs stay
+ * inside a string literal; `null` renders as the literal `null` and the
+ * client treats any non-string as unselected.
+ */
+export function encodeWebviewSelection(
+	selection: DashboardSelection & { overheadExpanded: boolean },
+): string {
+	// JSON.stringify alone does not escape `<`, `>`, or `&`, so a hostile ID
+	// could emit a literal `</script>` and break out of the inline script
+	// block. These replacements are all valid JSON string escapes, so
+	// JSON.parse reverses them exactly and the round trip is lossless.
+	return JSON.stringify({
+		selectedChatId: selection.selectedChatId ?? null,
+		selectedTaskId: selection.selectedTaskId ?? null,
+		overheadExpanded: selection.overheadExpanded === true,
+	})
+		.replace(/</g, '\\u003c')
+		.replace(/>/g, '\\u003e')
+		.replace(/&/g, '\\u0026')
+		.replace(/\u2028/g, '\\u2028')
+		.replace(/\u2029/g, '\\u2029');
+}
+
+/**
+ * DC-R1: applies a decoded hydration payload to client-side selection state.
+ * Pure so the repair contract stays unit-testable without a DOM.
+ */
+export function applyHydratedSelection(
+	current: DashboardSelection & { overheadExpanded: boolean },
+	hydrated: unknown,
+): DashboardSelection & { overheadExpanded: boolean } {
+	if (!hydrated || typeof hydrated !== 'object') {
+		return current;
+	}
+	const payload = hydrated as {
+		selectedChatId?: unknown;
+		selectedTaskId?: unknown;
+		overheadExpanded?: unknown;
+	};
+	return {
+		selectedChatId:
+			typeof payload.selectedChatId === 'string' && payload.selectedChatId
+				? payload.selectedChatId
+				: null,
+		selectedTaskId:
+			typeof payload.selectedTaskId === 'string' && payload.selectedTaskId
+				? payload.selectedTaskId
+				: null,
+		overheadExpanded: payload.overheadExpanded === true,
+	};
 }
 
 export interface DashboardSelection {
@@ -625,6 +682,14 @@ export class UsageDashboard {
 			`<p class="note">${escapeHtml(t('usage.dashboard.localChatNote'))}</p>`,
 			'<script>',
 			'const vscode = acquireVsCodeApi();',
+			// DC-R1: hydrate client-side selection from the effective
+			// server-rendered state. A `webview.html` replacement creates a new
+			// document, so without this the next click would post stale
+			// (null) IDs and collapse what the user just opened.
+			`window.__hydrated=${encodeWebviewSelection({ selectedChatId: effectiveChatId, selectedTaskId: effectiveTaskId, overheadExpanded: state.overheadExpanded })};`,
+			'window.__selectedChat=(typeof window.__hydrated.selectedChatId==="string"&&window.__hydrated.selectedChatId?window.__hydrated.selectedChatId:null);',
+			'window.__selectedTask=(typeof window.__hydrated.selectedTaskId==="string"&&window.__hydrated.selectedTaskId?window.__hydrated.selectedTaskId:null);',
+			'window.__overheadExpanded=(window.__hydrated.overheadExpanded===true);',
 			'function readState(){return {period:document.getElementById("period").value,projectId:document.getElementById("projectId").value,modelId:document.getElementById("modelId").value,search:document.getElementById("search").value}}',
 			'function current(extra){return Object.assign({command:"filter",selectedTaskId:window.__selectedTask||null,selectedChatId:window.__selectedChat||null,overheadExpanded:window.__overheadExpanded===true},readState(),extra||{})}',
 			'document.getElementById("apply").addEventListener("click",()=>vscode.postMessage(current()));',

@@ -4,8 +4,7 @@
 **Branch:** `ui/chat-first-usage-dashboard`  
 **Date:** 2026-09-25  
 **Target version:** 2.2.1  
-**Status:** REVIEW REPAIR
-
+**Status:** COMPLETE - PENDING REVIEW
 ## Intent
 
 The Muse Usage dashboard currently shows Tasks and Local Chats as separate top-level sections. When a Local Chat contains only one Task, both cards show nearly identical metrics and feel redundant.
@@ -152,3 +151,40 @@ The same missing hydration can make an already-expanded overhead card toggle inc
 - keep PR #2 as draft until Engineering Manager source review passes.
 
 No change is requested to the chat-first hierarchy itself. The default-view design (one Local Chat card, Tasks nested only after expansion) is accepted.
+
+## Completion — 2026-09-25 (Review Repair)
+
+Both findings are repaired on `ui/chat-first-usage-dashboard`; PR #2 stays draft pending Engineering Manager source review.
+
+### DC-R1 — Webview selection rehydration
+
+- `src/usage/dashboard.ts` adds `encodeWebviewSelection()` / `applyHydratedSelection()` (pure, unit-tested). Every render emits `window.__hydrated=<JSON>` built from the effective sanitized server selection plus `overheadExpanded`, then initializes `window.__selectedChat`, `window.__selectedTask`, and `window.__overheadExpanded` from it — so the next click after any `webview.html` replacement posts IDs consistent with what is visibly expanded.
+- The encoder JSON-serializes and additionally escapes `<`, `>`, `&`, U+2028, U+2029 (all valid JSON string escapes; `JSON.parse` reverses them), so hostile IDs cannot emit a literal `</script>` — a determinism test caught and pinned this (`JSON.stringify` alone does not escape `</script>`).
+- Post-repair interaction: opening a Local Chat then clicking a nested Task keeps the chat selected and opens Task detail through the existing `sanitizeDashboardSelection()` path; overhead toggle state survives refresh.
+
+### DC-R2 — Release metadata and closeout evidence
+
+- `package-lock.json` root and root-package `version` fields updated `2.2.0` → `2.2.1`; no dependency versions changed (`npm install` not rerun, so no lockfile churn).
+- This record set to `COMPLETE - PENDING REVIEW`.
+
+### Checks (post-repair, 2026-09-25)
+
+- `npm test`: 51 pass, 0 fail (48 prior + 3 new DC-R1 hydration tests)
+- `npm run compile` (`tsc`): pass
+- `npm run lint` (`oxlint`): 0 warnings, 0 errors
+- `npm run format:check`: pre-existing failures (51 files incl. untouched files on clean tree); no new formatting introduced — repair code follows the repo's tab style
+- `npm run package`: `dist/meta-spark-for-copilot-2.2.1.vsix` (83 files, 409,330 bytes)
+- VSIX SHA256: `124646E86349A71FEB5F4907BBEE6A42CDC1ED044F38747487A0278C25BF5265`
+
+### Changed files (this repair)
+
+- `src/usage/dashboard.ts` — hydration helpers + inline `window.__hydrated` init
+- `test/usage.test.cjs` — 3 DC-R1 tests (round-trip, no-raw-interpolation, every-render-hydrates)
+- `package-lock.json` — version fields 2.2.1
+- `docs/40-work-management/direct-changes/DC-0001-CHAT-FIRST-USAGE-DASHBOARD.md` — completion section + status
+
+### Residual caveats
+
+- No live-webview click-through performed (headless environment); hydration verified via deterministic unit + source-level contract tests.
+- `format:check` debt is pre-existing and untouched by this change.
+- Not published to Marketplace/Open VSX.

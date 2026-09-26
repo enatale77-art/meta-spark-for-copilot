@@ -23,7 +23,7 @@ const {
 	serializeMarkerPayload,
 	sanitizePromptText,
 } = require('../out/usage/context.js');
-const { usageSignatureChanged, shouldRefreshSignature, nextRefreshDecision, sanitizeDashboardSelection } = (() => {
+const { usageSignatureChanged, shouldRefreshSignature, nextRefreshDecision, sanitizeDashboardSelection, encodeWebviewSelection, applyHydratedSelection } = (() => {
 	const Module = require('node:module');
 	const { join } = require('node:path');
 	const stubPath = join(__dirname, 'vscode-stub.cjs');
@@ -1252,6 +1252,87 @@ describe('cross-window sync signatures (R10)', () => {
 		assert.equal(
 			tasks.reduce((sum, task) => sum + task.requests, 0),
 			chats[0].requests,
+		);
+	});
+
+	it('DC-R1: hydration payload round-trips the effective server selection', () => {
+		const encoded = encodeWebviewSelection({
+			selectedChatId: 'chat-a',
+			selectedTaskId: 'task-1',
+			overheadExpanded: true,
+		});
+		assert.deepEqual(JSON.parse(encoded), {
+			selectedChatId: 'chat-a',
+			selectedTaskId: 'task-1',
+			overheadExpanded: true,
+		});
+		// Nulls stay null; the client treats non-strings as unselected.
+		assert.deepEqual(
+			JSON.parse(
+				encodeWebviewSelection({ selectedChatId: null, selectedTaskId: null, overheadExpanded: false }),
+			),
+			{ selectedChatId: null, selectedTaskId: null, overheadExpanded: false },
+		);
+		assert.deepEqual(applyHydratedSelection(
+			{ selectedChatId: null, selectedTaskId: null, overheadExpanded: false },
+			JSON.parse(encoded),
+		), {
+			selectedChatId: 'chat-a',
+			selectedTaskId: 'task-1',
+			overheadExpanded: true,
+		});
+		// Malformed payloads never select.
+		assert.deepEqual(
+			applyHydratedSelection(
+				{ selectedChatId: 'chat-a', selectedTaskId: 'task-1', overheadExpanded: true },
+				null,
+			),
+			{ selectedChatId: 'chat-a', selectedTaskId: 'task-1', overheadExpanded: true },
+		);
+		assert.deepEqual(
+			applyHydratedSelection(
+				{ selectedChatId: null, selectedTaskId: null, overheadExpanded: false },
+				{ selectedChatId: 42, selectedTaskId: { evil: '</script>' }, overheadExpanded: 'yes' },
+			),
+			{ selectedChatId: null, selectedTaskId: null, overheadExpanded: false },
+		);
+	});
+
+	it('DC-R1: hydration payload never raw-interpolates untrusted IDs into JS', () => {
+		const hostile = '"></script><script>alert(1)</script>';
+		const encoded = encodeWebviewSelection({
+			selectedChatId: hostile,
+			selectedTaskId: hostile,
+			overheadExpanded: false,
+		});
+		// JSON string encoding keeps the payload inside a string literal:
+		// no literal </script> may appear in the emitted source.
+		assert.ok(!encoded.includes('</script>'));
+		assert.deepEqual(JSON.parse(encoded).selectedChatId, hostile);
+	});
+
+	it('DC-R1: every render hydrates client state from the effective server selection', () => {
+		const fs = require('node:fs');
+		const path = require('node:path');
+		const dashboard = fs.readFileSync(
+			path.join(__dirname, '..', 'src', 'usage', 'dashboard.ts'),
+			'utf8',
+		);
+		// The inline script seeds window state from JSON-encoded server state.
+		assert.ok(dashboard.includes('window.__hydrated='));
+		assert.ok(dashboard.includes('encodeWebviewSelection('));
+		assert.ok(dashboard.includes('window.__selectedChat='));
+		assert.ok(dashboard.includes('window.__selectedTask='));
+		assert.ok(dashboard.includes('window.__overheadExpanded='));
+		// The hydrated chat must survive a nested-task click: the task
+		// handler reads window.__selectedChat, and sanitize keeps the pair.
+		assert.deepEqual(
+			sanitizeDashboardSelection(
+				{ selectedChatId: 'chat-a', selectedTaskId: 'task-1' },
+				[{ taskId: 'task-1', chatId: 'chat-a' }],
+				['chat-a'],
+			),
+			{ selectedChatId: 'chat-a', selectedTaskId: 'task-1' },
 		);
 	});
 });
