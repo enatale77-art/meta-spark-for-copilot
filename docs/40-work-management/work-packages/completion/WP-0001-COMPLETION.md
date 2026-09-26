@@ -731,3 +731,21 @@ After R11Aâ€“R11D:
 - then repeat the live Copilot smoke. Do not merge before that live smoke passes.
 
 No change is requested to the overall R7 stateful-marker architecture or the R9 card-first visual design in this review.
+
+
+## Review Repair 02 — disposition (2026-09-25, same branch)
+
+All four R11 findings repaired in scope; revalidation complete.
+
+- **R11A (local live updates preserve state):** UsageService.onRecorded in src/runtime/lifecycle.ts now calls the new coalesced UsageDashboard.notifyRecorded() instead of the resetting efresh(). Local bursts share one efreshPreservingState() render on the same ~1.5s cadence as the cross-window watcher; period/project/model/search and selected Task/Chat/Overhead state are preserved. open() on an existing panel reconciles via efreshPreservingState() instead of resetting to defaults.
+- **R11B (debounce retention):** added pure 
+extRefreshDecision() in src/usage/dashboard.ts; pollSignature() retains a changed signature as pendingSignature during the holdoff instead of acknowledging it, then refreshes on a later poll even with no further writes. The acknowledged signature advances only on a successful render. Regression test covers change-inside-debounce followed by a quiet later poll.
+- **R11C (sanitizer echo):** sanitizePromptText() now strips <userRequest>/<user_query> wrappers first and only recovers wrapper inner text when nothing real remains; Fix the tests <context/> <userRequest>Fix the tests</userRequest> yields one copy, wrapper-only prompts still recover inner text. Context-only behavior unchanged.
+- **R11D (clear refreshes status):** the lifecycle setOnCleared callback now runs usageService.clearAll() **and** ctiveStatusBar.refresh() together, so dashboard Clear updates the status bar immediately; the Command Palette path already refreshes both. No-resurrection behavior preserved.
+- **Tests:** 
+pm test 42/42 pass (10 suites): 39 pre-existing plus R11B pending-refresh, R11C echo-dedup/wrapper-only, and R11A/R11D source-wiring cases.
+- **Checks:** 
+pm run compile pass; 
+pm run lint 0/0 (67 files); touched-file oxfmt --check clean (src/usage/dashboard.ts, src/usage/context.ts, src/runtime/lifecycle.ts); 
+pm run package rebuilt dist/meta-spark-for-copilot-2.2.0.vsix (83 files, 396.66 KB), SHA256 CA3256A8E6CD3B5A331583691FAA9E9F6B03B4C03410417E537BA4B7C89F4C6C; sce ls confirms test artifacts stay out of the VSIX. ACTIVE returned to COMPLETE - PENDING REVIEW; branch pushed and verified in sync with remote.
+

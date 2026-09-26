@@ -222,24 +222,39 @@ export function sanitizePromptText(text: string): string {
 	cleaned = cleaned.replace(/<context>[\s\S]*?<\/context>/gi, ' ');
 	cleaned = cleaned.replace(/<current_datetime>[\s\S]*?<\/current_datetime>/gi, ' ');
 	cleaned = cleaned.replace(/<pr_metadata\b[^>]*\/>/gi, ' ');
-	const unwrapped = unwrapUserPrompt(cleaned);
-	cleaned = unwrapped ?? cleaned;
+	// Copilot's persisted form often echoes the raw human prompt inside the
+	// wrapper: "Fix the tests <userRequest>Fix the tests</userRequest>". When
+	// real leading text remains after removing wrappers, keep that and drop
+	// the echo; only recover the wrapper's inner text when it holds the only
+	// real prompt.
+	const withoutWrappers = stripUserPromptWrappers(cleaned);
+	if (withoutWrappers.trim().length > 0) {
+		cleaned = withoutWrappers;
+	} else {
+		cleaned = recoverUserPromptInnerText(cleaned);
+	}
 	return cleaned.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
 }
 
-function unwrapUserPrompt(text: string): string | undefined {
-	const wrappers = ['userRequest', 'user_query'] as const;
-	let current = text;
-	let changed = false;
-	for (const tag of wrappers) {
+function stripUserPromptWrappers(text: string): string {
+	return text
+		.replace(/<userRequest>[\s\S]*?<\/userRequest>/gi, ' ')
+		.replace(/<user_query>[\s\S]*?<\/user_query>/gi, ' ');
+}
+
+function recoverUserPromptInnerText(text: string): string {
+	const inners: string[] = [];
+	for (const tag of ['userRequest', 'user_query'] as const) {
 		const pattern = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'gi');
-		const without = current.replace(pattern, (_match, inner: string) => {
-			changed = true;
-			return ` ${inner} `;
+		text.replace(pattern, (_match, inner: string) => {
+			inners.push(inner);
+			return ' ';
 		});
-		current = without;
 	}
-	return changed ? current : undefined;
+	if (inners.length === 0) {
+		return text;
+	}
+	return inners.join(' ');
 }
 
 function firstTaskPreview(messages: readonly CorrelationMessage[]): string {

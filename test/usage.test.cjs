@@ -26,6 +26,7 @@ const {
 const {
 	usageSignatureChanged,
 	shouldRefreshSignature,
+	nextRefreshDecision,
 } = (() => {
 	const Module = require('node:module');
 	const { join } = require('node:path');
@@ -876,5 +877,58 @@ describe('cross-window sync signatures (R10)', () => {
 		assert.equal(shouldRefreshSignature(before, after, 0, 1000, 1500), false);
 		assert.equal(shouldRefreshSignature(before, after, 0, 2000, 1500), true);
 		assert.equal(shouldRefreshSignature(after, after, 0, 5000, 1500), false);
+	});
+
+	it('R11B: change inside debounce stays pending and refreshes on a later poll', () => {
+		const before = signatureFromLedger([], emptyContexts());
+		const after = signatureFromLedger([makeRecord({})], emptyContexts());
+		// Change arrives 200ms after the last render: hold, do not acknowledge.
+		const held = nextRefreshDecision(
+			{ acknowledged: before, pending: undefined, lastRefreshMs: 0 },
+			after,
+			200,
+			1500,
+		);
+		assert.equal(held.shouldRefresh, false);
+		assert.deepEqual(held.pending, after);
+		// No new writes; a later poll past the interval still refreshes.
+		const later = nextRefreshDecision(
+			{ acknowledged: before, pending: held.pending, lastRefreshMs: 0 },
+			held.pending,
+			2000,
+			1500,
+		);
+		assert.equal(later.shouldRefresh, true);
+	});
+
+	it('R11C: leading prompt plus echoed wrapper yields one copy; wrapper-only recovers inner text', () => {
+		assert.equal(
+			normalizePreview('Fix the tests\n<context>x</context>\n<userRequest>Fix the tests</userRequest>'),
+			'Fix the tests',
+		);
+		assert.equal(normalizePreview('<userRequest>Fix the tests</userRequest>'), 'Fix the tests');
+		assert.equal(normalizePreview('<user_query>Fix the tests</user_query>'), 'Fix the tests');
+	});
+
+	it('R11A/R11D: local live path preserves state and clear refreshes status', () => {
+		const fs = require('node:fs');
+		const path = require('node:path');
+		const lifecycle = fs.readFileSync(
+			path.join(__dirname, '..', 'src', 'runtime', 'lifecycle.ts'),
+			'utf8',
+		);
+		const dashboard = fs.readFileSync(
+			path.join(__dirname, '..', 'src', 'usage', 'dashboard.ts'),
+			'utf8',
+		);
+		// Local records must not call the resetting refresh().
+		assert.ok(!lifecycle.includes('activeDashboard\n\t\t\t\t?.refresh()'));
+		assert.ok(!lifecycle.includes('activeDashboard?.refresh()'));
+		assert.ok(lifecycle.includes('notifyRecorded()'));
+		assert.ok(dashboard.includes('notifyRecorded()'));
+		// Dashboard clear must refresh the status bar (R11D).
+		assert.ok(lifecycle.includes('usageService.clearAll()'));
+		const clearBlock = lifecycle.slice(lifecycle.indexOf('setOnCleared'));
+		assert.ok(clearBlock.includes('activeStatusBar'));
 	});
 });

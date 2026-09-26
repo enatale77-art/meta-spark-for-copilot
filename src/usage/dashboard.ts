@@ -59,6 +59,36 @@ export function shouldRefreshSignature(
 	return nowMs - lastRefreshMs >= minIntervalMs;
 }
 
+export interface PendingRefreshState {
+	acknowledged: UsageChangeSignature | undefined;
+	pending: UsageChangeSignature | undefined;
+	lastRefreshMs: number;
+}
+
+/**
+ * R11B: decide whether a poll should render now or hold a pending change.
+ * A changed signature observed inside the debounce holdoff is retained as
+ * pending (never acknowledged as seen) so a later poll still refreshes even
+ * when no further writes occur.
+ */
+export function nextRefreshDecision(
+	state: PendingRefreshState,
+	current: UsageChangeSignature | undefined,
+	nowMs: number,
+	minIntervalMs: number,
+): { shouldRefresh: boolean; pending: UsageChangeSignature | undefined } {
+	if (!current) {
+		return { shouldRefresh: false, pending: state.pending };
+	}
+	if (!usageSignatureChanged(state.acknowledged, current)) {
+		return { shouldRefresh: false, pending: undefined };
+	}
+	if (nowMs - state.lastRefreshMs >= minIntervalMs) {
+		return { shouldRefresh: true, pending: undefined };
+	}
+	return { shouldRefresh: false, pending: current };
+}
+
 export class UsageDashboard {
 	private panel: vscode.WebviewPanel | undefined;
 	private readonly disposables: vscode.Disposable[] = [];
@@ -73,8 +103,11 @@ export class UsageDashboard {
 	};
 	private watchTimer: NodeJS.Timeout | undefined;
 	private lastSignature: UsageChangeSignature | undefined;
+	private pendingSignature: UsageChangeSignature | undefined;
 	private lastRefreshMs = 0;
 	private refreshInFlight = false;
+	private notifyTimer: NodeJS.Timeout | undefined;
+	private notifyPending = false;
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
@@ -89,7 +122,7 @@ export class UsageDashboard {
 	async open(): Promise<void> {
 		if (this.panel) {
 			this.panel.reveal();
-			await this.refresh();
+			await this.refreshPreservingState();
 			return;
 		}
 		this.panel = vscode.window.createWebviewPanel(
@@ -130,8 +163,40 @@ export class UsageDashboard {
 			null,
 			this.disposables,
 		);
-		await this.refresh();
+		await this.refreshPreservingState();
 		this.startWatching();
+	}
+
+	/**
+	 * R11A: coalesced entry point for locally recorded usage. Bursts of
+	 * ledger writes share one state-preserving render on roughly the same
+	 * 1–2s cadence as the cross-window watcher; filters and expanded
+	 * Task/Chat/Overhead state are never reset by live updates.
+	 */
+	notifyRecorded(): void {
+		if (!this.panel) {
+			return;
+		}
+		if (this.notifyTimer) {
+			this.notifyPending = true;
+			return;
+		}
+		this.notifyPending = true;
+		this.notifyTimer = setTimeout(() => {
+			this.notifyTimer = undefined;
+			if (!this.notifyPending) {
+				return;
+			}
+			this.notifyPending = false;
+			void this.refreshPreservingState().finally(() => {
+				if (this.notifyPending && !this.notifyTimer) {
+					this.notifyRecorded();
+				}
+			});
+		}, 1500);
+		if (typeof this.notifyTimer.unref === 'function') {
+			this.notifyTimer.unref();
+		}
 	}
 
 	async refresh(): Promise<void> {
@@ -583,10 +648,26 @@ export class UsageDashboard {
 		if (!current) {
 			return;
 		}
-		if (shouldRefreshSignature(this.lastSignature, current, this.lastRefreshMs, Date.now(), 1500)) {
+		// R11B: never acknowledge a changed signature merely because it was
+		// observed inside the debounce holdoff. Retain it as pending so the
+		// next poll still refreshes even when no further writes occur.
+		const decision = nextRefreshDecision(
+			{
+				acknowledged: this.lastSignature,
+				pending: this.pendingSignature,
+				lastRefreshMs: this.lastRefreshMs,
+			},
+			current,
+			Date.now(),
+			1500,
+		);
+		this.pendingSignature = decision.pending ?? this.pendingSignature;
+		if (!decision.shouldRefresh && this.pendingSignature) {
+			return;
+		}
+		if (decision.shouldRefresh) {
+			this.pendingSignature = undefined;
 			await this.refreshPreservingState();
-		} else {
-			this.lastSignature = current;
 		}
 	}
 
