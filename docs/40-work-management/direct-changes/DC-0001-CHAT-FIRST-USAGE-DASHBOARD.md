@@ -4,7 +4,7 @@
 **Branch:** `ui/chat-first-usage-dashboard`  
 **Date:** 2026-09-25  
 **Target version:** 2.2.1  
-**Status:** COMPLETE - PENDING REVIEW
+**Status:** ACCEPTED - READY FOR INTEGRATION
 ## Intent
 
 The Muse Usage dashboard currently shows Tasks and Local Chats as separate top-level sections. When a Local Chat contains only one Task, both cards show nearly identical metrics and feel redundant.
@@ -188,3 +188,23 @@ Both findings are repaired on `ui/chat-first-usage-dashboard`; PR #2 stays draft
 - No live-webview click-through performed (headless environment); hydration verified via deterministic unit + source-level contract tests.
 - `format:check` debt is pre-existing and untouched by this change.
 - Not published to Marketplace/Open VSX.
+
+
+## Engineering Manager Review 02 — 2026-09-25
+
+**Disposition:** PASS — DC-0001 accepted for routine integration.
+
+Source review of repair commit `81bd6dc1614841987c3c99aa8bb6d9f35f9c5dff` confirms:
+
+- the default dashboard is chat-first: one top-level Local Chat card per conversation, with Tasks rendered only inside the selected chat;
+- Task diagnostics remain nested inside the selected Local Chat context;
+- `sanitizeDashboardSelection()` clears stale cross-chat task state;
+- DC-R1 is repaired: every rendered webview hydrates `selectedChatId`, `selectedTaskId`, and `overheadExpanded` from the effective server-rendered state using JSON encoding plus script-safe escaping;
+- DC-R2 is repaired: `package.json` and the root `package-lock.json` metadata both report version `2.2.1`;
+- aggregation, correlation, pricing, persistence, CSV export, and privacy behavior remain unchanged.
+
+Reported validation is internally consistent: 51/51 tests pass, compile/lint pass, package build succeeds, and the built VSIX is `dist/meta-spark-for-copilot-2.2.1.vsix` with SHA256 `124646E86349A71FEB5F4907BBEE6A42CDC1ED044F38747487A0278C25BF5265`.
+
+The remaining caveat is that the final nested click-through was not exercised in a live VS Code webview during execution; the repaired hydration path is nevertheless covered by deterministic tests and direct source review. For this lightweight presentation-only Direct Change, that is not a reserved integration gate.
+
+Routine integration through PR #2 is authorized under delegated project governance; no separate merge-approval ceremony is required.
