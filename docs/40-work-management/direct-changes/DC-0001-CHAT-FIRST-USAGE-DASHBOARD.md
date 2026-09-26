@@ -4,7 +4,7 @@
 **Branch:** `ui/chat-first-usage-dashboard`  
 **Date:** 2026-09-25  
 **Target version:** 2.2.1  
-**Status:** ACCEPTED - READY FOR INTEGRATION
+**Status:** INTEGRATED
 ## Intent
 
 The Muse Usage dashboard currently shows Tasks and Local Chats as separate top-level sections. When a Local Chat contains only one Task, both cards show nearly identical metrics and feel redundant.
@@ -208,3 +208,16 @@ Reported validation is internally consistent: 51/51 tests pass, compile/lint pas
 The remaining caveat is that the final nested click-through was not exercised in a live VS Code webview during execution; the repaired hydration path is nevertheless covered by deterministic tests and direct source review. For this lightweight presentation-only Direct Change, that is not a reserved integration gate.
 
 Routine integration through PR #2 is authorized under delegated project governance; no separate merge-approval ceremony is required.
+
+
+## Integration Closeout — 2026-09-25
+
+DC-0001 was integrated to `main` through PR #2.
+
+- PR: #2 — UI: make Muse Usage dashboard chat-first
+- Merge commit: `d106f34ed2e2daa917e0db279451cd691a967f48`
+- Integrated version: `2.2.1`
+- Built VSIX: `dist/meta-spark-for-copilot-2.2.1.vsix`
+- VSIX SHA256: `124646E86349A71FEB5F4907BBEE6A42CDC1ED044F38747487A0278C25BF5265`
+
+The Direct Change is complete and integrated. No Marketplace/Open VSX publication was performed.
