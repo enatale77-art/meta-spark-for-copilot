@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.2.1
+
+### Changes
+
+- **Chat-first usage dashboard** — Local Chat is now the single primary unit in the default dashboard (hierarchy: Project → Local Chat → Task → Request). The separate top-level Tasks section is gone: each collapsed Local Chat card shows the local subject, project, task/request counts, compact input, cache-hit %, compact output, and estimated cost; Tasks appear only inside the expanded chat, and request-level diagnostics render inside the selected task in that chat context
+- Opening another Local Chat (or collapsing it) clears the previous task selection; live local updates and cross-window sync preserve filters and the expanded chat/task while they still exist. No page-level horizontal scrolling; request tables scroll locally
+- Aggregation totals, CSV export, storage, correlation, pricing, and privacy rules are unchanged
+
+### Notes
+
+- **Patch release (2.2.1)**: dashboard presentation change only; no model, setting, or data-format changes.
+
 ## 2.2.0
 
 ### Features
