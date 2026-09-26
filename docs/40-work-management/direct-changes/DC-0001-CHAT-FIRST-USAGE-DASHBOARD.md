@@ -221,3 +221,18 @@ DC-0001 was integrated to `main` through PR #2.
 - VSIX SHA256: `124646E86349A71FEB5F4907BBEE6A42CDC1ED044F38747487A0278C25BF5265`
 
 The Direct Change is complete and integrated. No Marketplace/Open VSX publication was performed.
+
+
+## Post-Integration Visual Smoke — 2026-09-25
+
+**Disposition:** PASS
+
+The installed 2.2.1 VSIX was visually smoke-tested after integration. The Product Owner confirmed the chat-first interaction behaves as intended:
+
+- default dashboard shows Local Chat cards without a duplicate top-level Tasks section;
+- opening a Local Chat reveals its Tasks;
+- opening a Task reveals request-level diagnostics;
+- collapsing the Local Chat hides nested Tasks again;
+- filters and expanded-state behavior remained acceptable during use.
+
+DC-0001 is fully closed.
