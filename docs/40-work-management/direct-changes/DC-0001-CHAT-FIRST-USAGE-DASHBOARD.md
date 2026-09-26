@@ -4,7 +4,7 @@
 **Branch:** `ui/chat-first-usage-dashboard`  
 **Date:** 2026-09-25  
 **Target version:** 2.2.1  
-**Status:** READY FOR EXECUTION
+**Status:** REVIEW REPAIR
 
 ## Intent
 
@@ -108,3 +108,47 @@ Use the repository's lightweight Direct Change lane. Commit and push all work on
 - package path
 - VSIX SHA256
 - any residual caveats
+
+
+## Engineering Manager Review 01 — 2026-09-25
+
+**Disposition:** CHANGES REQUIRED — the chat-first layout is implemented correctly at source level, but one interaction defect prevents Task drill-down after a Local Chat is opened, and release metadata is incomplete.
+
+### DC-R1 — Rehydrate webview selection state after every HTML render
+
+**Current issue:** the webview event handlers use `window.__selectedChat`, `window.__selectedTask`, and `window.__overheadExpanded`, but a full `webview.html` replacement creates a new document and those variables are not initialized from the server-rendered state.
+
+Live interaction consequence:
+
+1. User clicks a Local Chat card.
+2. Host renders the expanded Local Chat and replaces `webview.html`.
+3. The new document starts with `window.__selectedChat === undefined` even though the server view state still has the chat selected.
+4. User clicks a nested Task card.
+5. The Task handler posts `selectedTaskId` but `selectedChatId: null`.
+6. `sanitizeDashboardSelection()` correctly rejects a Task without its parent chat, so the chat collapses instead of opening Task detail.
+
+The same missing hydration can make an already-expanded overhead card toggle incorrectly after a refresh.
+
+**Required correction:**
+- emit/init the client-side selection variables from the effective server-rendered state on every render:
+  - selected Local Chat ID;
+  - selected Task ID;
+  - overhead expanded state;
+- JSON-encode/escape values safely; do not interpolate untrusted text into executable JS;
+- after opening a Local Chat, clicking one of its Tasks must keep that chat selected and open the Task detail;
+- after a live/cross-window refresh, the next user click must behave consistently with what is visibly expanded;
+- add deterministic/source-level coverage for the hydration contract and, if practical, a small interaction test seam.
+
+### DC-R2 — Keep release metadata and closeout evidence internally consistent
+
+**Current issue:** `package.json` is `2.2.1`, but `package-lock.json` still declares `2.2.0` at both the lockfile root and root-package entry. The Direct Change record also remains at execution status and does not contain the requested package/check/hash completion evidence.
+
+**Required correction:**
+- update the top-level and root-package `package-lock.json` version fields to `2.2.1` without changing dependency versions;
+- after the interaction repair, rerun tests/compile/lint/relevant format/package;
+- rebuild `dist/meta-spark-for-copilot-2.2.1.vsix`;
+- append a Direct Change completion section with test/check results, VSIX path, SHA256, changed files, and residual caveats;
+- set this record to `COMPLETE - PENDING REVIEW`;
+- keep PR #2 as draft until Engineering Manager source review passes.
+
+No change is requested to the chat-first hierarchy itself. The default-view design (one Local Chat card, Tasks nested only after expansion) is accepted.
