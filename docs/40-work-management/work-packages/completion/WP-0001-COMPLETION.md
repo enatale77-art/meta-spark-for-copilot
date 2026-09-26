@@ -4,7 +4,7 @@
 **Branch:** `wp/0001-muse-usage-monitor`
 **Date:** 2026-09-25
 **Version:** 2.2.0 (additive minor release)
-**Status:** ACCEPTED - READY FOR INTEGRATION
+**Status:** INTEGRATED
 
 ## Summary
 
@@ -925,3 +925,16 @@ Accepted live behavior includes the final criteria carried forward from Reviews 
 The final accepted package remains `dist/meta-spark-for-copilot-2.2.0.vsix`, SHA256 `BCD93AAA4D47C0CBE877956FCA0898A32EEAEAD4AFEBE1B81BB81D27ACC3283B`.
 
 WP-0001 is technically accepted. Routine integration to `main` is authorized under delegated project governance; no separate merge-approval ceremony is required.
+
+
+## Integration Closeout — 2026-09-25
+
+WP-0001 was integrated to `main` through PR #1 after final live acceptance.
+
+- PR: #1 — WP-0001: Muse per-task usage monitor
+- Merge commit: `6b190f6e28db1b88eecfe785ef490b773f3e10ab`
+- Final accepted VSIX: `dist/meta-spark-for-copilot-2.2.0.vsix`
+- Accepted VSIX SHA256: `BCD93AAA4D47C0CBE877956FCA0898A32EEAEAD4AFEBE1B81BB81D27ACC3283B`
+- Final live Copilot smoke: PASS
+
+No active Managed Work remains after this integration.
