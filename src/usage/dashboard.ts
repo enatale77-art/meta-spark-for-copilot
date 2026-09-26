@@ -89,6 +89,39 @@ export function nextRefreshDecision(
 	return { shouldRefresh: false, pending: current };
 }
 
+export interface DashboardSelection {
+	selectedChatId: string | null;
+	selectedTaskId: string | null;
+}
+
+/**
+ * DC-0001 chat-first selection rule (pure, unit-tested): a task is only
+ * selected in the context of its parent chat. Switching to another chat,
+ * collapsing the chat, or losing the chat to filters clears the task.
+ */
+export function sanitizeDashboardSelection(
+	selection: DashboardSelection,
+	tasks: ReadonlyArray<{ taskId: string; chatId: string | null }>,
+	chatIds: ReadonlySet<string> | ReadonlyArray<string>,
+): DashboardSelection {
+	const known: Set<string> = Array.isArray(chatIds) ? new Set(chatIds) : new Set(chatIds);
+	let selectedChatId = selection.selectedChatId;
+	let selectedTaskId = selection.selectedTaskId;
+	if (selectedChatId && !known.has(selectedChatId)) {
+		selectedChatId = null;
+		selectedTaskId = null;
+	}
+	if (!selectedChatId) {
+		selectedTaskId = null;
+	} else if (selectedTaskId) {
+		const task = tasks.find((candidate) => candidate.taskId === selectedTaskId);
+		if (!task || task.chatId !== selectedChatId) {
+			selectedTaskId = null;
+		}
+	}
+	return { selectedChatId, selectedTaskId };
+}
+
 export class UsageDashboard {
 	private panel: vscode.WebviewPanel | undefined;
 	private readonly disposables: vscode.Disposable[] = [];
@@ -217,7 +250,7 @@ export class UsageDashboard {
 			};
 			this.lastSignature = await this.readSignature().catch(() => undefined);
 			this.lastRefreshMs = Date.now();
-			this.panel.webview.html = this.renderDashboard(ledger.records, contexts, this.viewState);
+			this.panel.webview.html = this.renderDashboard(ledger.records, contexts, this.viewState).html;
 			if (ledger.corruptedLines > 0) {
 				logger.warn(
 					`[usage] Ignored ${ledger.corruptedLines} corrupted ledger line(s); history remains readable.`,
@@ -257,7 +290,14 @@ export class UsageDashboard {
 				};
 				const ledger = await this.store.readRequests();
 				const contexts = await this.store.readContexts();
-				this.panel.webview.html = this.renderDashboard(ledger.records, contexts, this.viewState);
+				// DC-0001 chat-first: opening another chat clears the previous
+				// task client-side; the sanitizer inside renderDashboard
+				// additionally drops stale cross-chat selections after filter
+				// changes or live updates.
+				const rendered = this.renderDashboard(ledger.records, contexts, this.viewState);
+				this.viewState.selectedChatId = rendered.selectedChatId;
+				this.viewState.selectedTaskId = rendered.selectedTaskId;
+				this.panel.webview.html = rendered.html;
 			} else if (message.command === 'exportCsv') {
 				await this.exportCsv();
 			} else if (message.command === 'clear') {
@@ -331,7 +371,7 @@ export class UsageDashboard {
 			tasks: Record<string, { preview: string }>;
 		},
 		state: UsageDashboardState,
-	): string {
+	): { html: string; selectedChatId: string | null; selectedTaskId: string | null } {
 		const periodDays = state.period === 'all' ? null : Number.parseInt(state.period, 10);
 		let records = filterByTime(allRecords, Date.now(), periodDays);
 		if (state.projectId !== 'all') {
@@ -361,28 +401,43 @@ export class UsageDashboard {
 			allRecords.map((record) => [record.projectId, record.projectName] as const),
 		);
 
-		const selectedTask = state.selectedTaskId
-			? tasks.find((task) => task.taskId === state.selectedTaskId)
-			: undefined;
-		const selectedRequests = selectedTask
-			? records
-					.filter((record) => record.taskId === selectedTask.taskId)
-					.sort((a, b) => a.timestampMs - b.timestampMs)
-			: [];
-		const overhead = rollupUnassignedOverhead(records);
-		const selectedChat = state.selectedChatId
-			? chats.find((chat) => chat.chatId === state.selectedChatId)
+		// DC-0001 chat-first: a task is only selected in the context of its
+		// parent chat. Stale cross-chat selections are dropped so switching
+		// chats (or losing a chat to filters) never shows another chat's task.
+		const chatIds = new Set(chats.map((chat) => chat.chatId));
+		const selection = sanitizeDashboardSelection(
+			{ selectedChatId: state.selectedChatId, selectedTaskId: state.selectedTaskId },
+			tasks,
+			chatIds,
+		);
+		const selectedChat = selection.selectedChatId
+			? chats.find((chat) => chat.chatId === selection.selectedChatId)
 			: undefined;
 		const selectedChatTasks = selectedChat
 			? tasks.filter((task) => task.chatId === selectedChat.chatId)
 			: [];
+		const selectedTask =
+			selection.selectedTaskId && selectedChat
+				? selectedChatTasks.find((task) => task.taskId === selection.selectedTaskId)
+				: undefined;
+		const selectedRequests = selectedTask
+			? records
+					.filter((record) => record.taskId === selectedTask.taskId)
+					.sort((a, b) => a.timestampMs - b.timestampMs)
+				: [];
+		const overhead = rollupUnassignedOverhead(records);
+		const effectiveChatId = selectedChat ? selectedChat.chatId : null;
+		const effectiveTaskId = selectedTask ? selectedTask.taskId : null;
 
-		return [
+		const html = [
 			'<!DOCTYPE html><html><head><meta charset="utf-8">',
 			"<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'none'; connect-src 'none';\">",
 			'<meta name="viewport" content="width=device-width, initial-scale=1">',
 			'<style>',
-			'body{font-family:var(--vscode-font-family);padding:16px;color:var(--vscode-foreground);background:var(--vscode-editor-background);max-width:1100px;margin:0 auto}',
+			'body{font-family:var(--vscode-font-family);padding:16px;color:var(--vscode-foreground);background:var(--vscode-editor-background);max-width:1100px;margin:0 auto;overflow-x:hidden}',
+			'.chat-summary{border-left:3px solid var(--vscode-focusBorder);padding:2px 0 2px 12px;margin:8px 0}',
+			'.chat-detail h4{margin:12px 0 4px}',
+			'.task-detail{border-style:dashed}',
 			'.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:12px 0}',
 			'.card{border:1px solid var(--vscode-panel-border);border-radius:8px;padding:10px 14px;min-width:0;background:var(--vscode-sideBar-background)}',
 			'.card .label{opacity:.75;font-size:12px}',
@@ -449,79 +504,85 @@ export class UsageDashboard {
 			summaryCard(t('usage.dashboard.output'), formatCompact(totals.outputTokens)),
 			summaryCard(t('usage.dashboard.cost'), formatCost(totals.estimatedCostUsd)),
 			`</div>`,
-			`<h3>${escapeHtml(t('usage.dashboard.tasks'))} (${tasks.length})</h3>`,
-			tasks.length === 0
-				? `<p class="note">${escapeHtml(t('usage.dashboard.empty'))}</p>`
-				: [
-						'<div class="grid" role="list">',
-						...tasks.map((task) => taskCard(task, state.selectedTaskId === task.taskId)),
-						'</div>',
-					].join(''),
-			selectedTask
-				? [
-						`<div class="detail" id="task-detail">`,
-						`<h3>${escapeHtml(t('usage.dashboard.taskDetail'))}: ${escapeHtml(selectedTask.preview || selectedTask.taskId.slice(0, 8))}</h3>`,
-						`<p class="note">task_id <code>${escapeHtml(selectedTask.taskId)}</code> <button data-copy="${escapeHtml(selectedTask.taskId)}">${escapeHtml(t('usage.dashboard.copy'))}</button> · chat_id <code>${escapeHtml(selectedTask.chatId ?? '')}</code> <button data-copy="${escapeHtml(selectedTask.chatId ?? '')}">${escapeHtml(t('usage.dashboard.copy'))}</button></p>`,
-						`<p class="note">${escapeHtml(t('usage.dashboard.start'))}: ${escapeHtml(formatDateTime(selectedTask.firstSeenMs))} · ${escapeHtml(t('usage.dashboard.lastActivity'))}: ${escapeHtml(formatDateTime(selectedTask.lastSeenMs))}</p>`,
-						`<p class="note">${escapeHtml(t('usage.dashboard.input'))}: ${formatNumber(selectedTask.inputTokens)} · ${escapeHtml(t('usage.dashboard.cached'))}: ${formatNumber(selectedTask.cachedTokens)} · ${escapeHtml(t('usage.dashboard.output'))}: ${formatNumber(selectedTask.outputTokens)} · ${escapeHtml(t('usage.dashboard.reasoning'))}: ${formatNumber(selectedTask.reasoningTokens)}</p>`,
-						`<p class="note">${escapeHtml(t('usage.dashboard.kindBreakdown'))}</p>`,
-						'<div class="detail-scroll">',
-						'<table><thead><tr>',
-						`<th>${escapeHtml(t('usage.dashboard.kind'))}</th><th>${escapeHtml(t('usage.dashboard.requests'))}</th>`,
-						`<th>${escapeHtml(t('usage.dashboard.input'))}</th><th>${escapeHtml(t('usage.dashboard.cached'))}</th>`,
-						`<th>${escapeHtml(t('usage.dashboard.cacheHit'))}</th><th>${escapeHtml(t('usage.dashboard.output'))}</th>`,
-						`<th>${escapeHtml(t('usage.dashboard.reasoning'))}</th><th>${escapeHtml(t('usage.dashboard.cost'))}</th>`,
-						'</tr></thead><tbody>',
-						...Object.entries(selectedTask.byKind)
-							.sort((a, b) => b[1].requests - a[1].requests)
-							.map(
-								([kind, kindTotals]) =>
-									`<tr><td>${escapeHtml(kind)}</td><td>${kindTotals.requests}</td>` +
-									`<td>${formatNumber(kindTotals.inputTokens)}</td><td>${formatNumber(kindTotals.cachedTokens)}</td>` +
-									`<td>${kindTotals.cacheHitPct.toFixed(1)}%</td><td>${formatNumber(kindTotals.outputTokens)}</td>` +
-									`<td>${formatNumber(kindTotals.reasoningTokens)}</td><td>${formatCost(kindTotals.estimatedCostUsd)}</td></tr>`,
-							),
-						'</tbody></table>',
-						'</div>',
-						'<div class="detail-scroll">',
-						'<table><thead><tr>',
-						`<th>${escapeHtml(t('usage.dashboard.time'))}</th><th>${escapeHtml(t('usage.dashboard.kind'))}</th>`,
-						`<th>${escapeHtml(t('usage.dashboard.input'))}</th><th>${escapeHtml(t('usage.dashboard.cached'))}</th>`,
-						`<th>${escapeHtml(t('usage.dashboard.output'))}</th><th>${escapeHtml(t('usage.dashboard.cost'))}</th>`,
-						'</tr></thead><tbody>',
-						...selectedRequests.map(
-							(record) =>
-								`<tr><td>${escapeHtml(record.timestamp)}</td><td>${escapeHtml(record.requestKind)}</td>` +
-								`<td>${formatNullable(record.promptTokens)}</td><td>${formatNullable(record.cachedInputTokens)}</td>` +
-								`<td>${formatNullable(record.completionTokens)}</td><td>${formatCost(record.estimatedCostUsd ?? 0)}</td></tr>`,
-						),
-						'</tbody></table>',
-						'</div>',
-						`<p><button class="secondary" data-collapse="task">${escapeHtml(t('usage.dashboard.collapse'))}</button></p>`,
-						`</div>`,
-					].join('')
-				: '',
+			// DC-0001 chat-first: the default dashboard shows one Local Chat
+			// card per chat (no separate top-level Tasks section). Task cards
+			// and request diagnostics render only inside the expanded chat.
 			`<h3>${escapeHtml(t('usage.dashboard.chats'))} (${chats.length})</h3>`,
 			chats.length === 0
 				? `<p class="note">${escapeHtml(t('usage.dashboard.emptyChats'))}</p>`
 				: [
 						'<div class="grid" role="list">',
-						...chats.map((chat) => chatCard(chat, tasks, state.selectedChatId === chat.chatId)),
+						...chats.map((chat) =>
+							chatCard(chat, selection.selectedChatId === chat.chatId),
+						),
 						'</div>',
 					].join(''),
 			selectedChat
 				? [
-						`<div class="detail" id="chat-detail">`,
+						`<div class="detail chat-detail" id="chat-detail">`,
+						`<div class="chat-summary">`,
 						`<h3>${escapeHtml(t('usage.dashboard.localSubject'))}: ${escapeHtml(selectedChat.displayName)}</h3>`,
+						`<p class="note">${escapeHtml(selectedChat.projectName)}</p>`,
+						`<p class="note">${escapeHtml(t('usage.dashboard.tasks'))}: ${selectedChat.taskCount} · ${escapeHtml(t('usage.dashboard.requests'))}: ${selectedChat.requests}</p>`,
+						`<p class="note">${escapeHtml(t('usage.dashboard.input'))}: ${formatNumber(selectedChat.inputTokens)} · ${escapeHtml(t('usage.dashboard.cached'))}: ${formatNumber(selectedChat.cachedTokens)} (${selectedChat.cacheHitPct.toFixed(1)}%) · ${escapeHtml(t('usage.dashboard.uncached'))}: ${formatNumber(selectedChat.uncachedTokens)} · ${escapeHtml(t('usage.dashboard.output'))}: ${formatNumber(selectedChat.outputTokens)} · ${escapeHtml(t('usage.dashboard.reasoning'))}: ${formatNumber(selectedChat.reasoningTokens)}</p>`,
+						`<p class="note">${escapeHtml(t('usage.dashboard.cost'))}: ${formatCost(selectedChat.estimatedCostUsd)} · ${escapeHtml(t('usage.dashboard.start'))}: ${escapeHtml(formatDateTime(selectedChat.firstSeenMs))} · ${escapeHtml(t('usage.dashboard.lastActivity'))}: ${escapeHtml(formatDateTime(selectedChat.lastSeenMs))}</p>`,
+						`</div>`,
 						`<p class="note">${escapeHtml(t('usage.dashboard.localSubjectNote'))}</p>`,
 						`<p class="note">chat_id <code>${escapeHtml(selectedChat.chatId)}</code> <button data-copy="${escapeHtml(selectedChat.chatId)}">${escapeHtml(t('usage.dashboard.copy'))}</button></p>`,
-						`<p class="note">${escapeHtml(t('usage.dashboard.tasks'))}: ${selectedChat.taskCount} · ${escapeHtml(t('usage.dashboard.requests'))}: ${selectedChat.requests} · ${escapeHtml(t('usage.dashboard.cost'))}: ${formatCost(selectedChat.estimatedCostUsd)}</p>`,
-						`<p class="note">${escapeHtml(t('usage.dashboard.start'))}: ${escapeHtml(formatDateTime(selectedChat.firstSeenMs))} · ${escapeHtml(t('usage.dashboard.lastActivity'))}: ${escapeHtml(formatDateTime(selectedChat.lastSeenMs))}</p>`,
-						'<div class="grid" role="list">',
-						...selectedChatTasks.map((task) =>
-							taskCard(task, state.selectedTaskId === task.taskId),
-						),
-						'</div>',
+						`<h4>${escapeHtml(t('usage.dashboard.tasks'))} (${selectedChatTasks.length})</h4>`,
+						selectedChatTasks.length === 0
+							? `<p class="note">${escapeHtml(t('usage.dashboard.empty'))}</p>`
+							: [
+									'<div class="grid" role="list">',
+									...selectedChatTasks.map((task) =>
+										taskCard(task, effectiveTaskId === task.taskId),
+									),
+									'</div>',
+								].join(''),
+						selectedTask
+							? [
+									`<div class="detail task-detail" id="task-detail">`,
+									`<h4>${escapeHtml(t('usage.dashboard.taskDetail'))}: ${escapeHtml(selectedTask.preview || selectedTask.taskId.slice(0, 8))}</h4>`,
+									`<p class="note">task_id <code>${escapeHtml(selectedTask.taskId)}</code> <button data-copy="${escapeHtml(selectedTask.taskId)}">${escapeHtml(t('usage.dashboard.copy'))}</button> · chat_id <code>${escapeHtml(selectedTask.chatId ?? '')}</code> <button data-copy="${escapeHtml(selectedTask.chatId ?? '')}">${escapeHtml(t('usage.dashboard.copy'))}</button></p>`,
+									`<p class="note">${escapeHtml(t('usage.dashboard.start'))}: ${escapeHtml(formatDateTime(selectedTask.firstSeenMs))} · ${escapeHtml(t('usage.dashboard.lastActivity'))}: ${escapeHtml(formatDateTime(selectedTask.lastSeenMs))}</p>`,
+									`<p class="note">${escapeHtml(t('usage.dashboard.input'))}: ${formatNumber(selectedTask.inputTokens)} · ${escapeHtml(t('usage.dashboard.cached'))}: ${formatNumber(selectedTask.cachedTokens)} · ${escapeHtml(t('usage.dashboard.output'))}: ${formatNumber(selectedTask.outputTokens)} · ${escapeHtml(t('usage.dashboard.reasoning'))}: ${formatNumber(selectedTask.reasoningTokens)}</p>`,
+									`<p class="note">${escapeHtml(t('usage.dashboard.kindBreakdown'))}</p>`,
+									'<div class="detail-scroll">',
+									'<table><thead><tr>',
+									`<th>${escapeHtml(t('usage.dashboard.kind'))}</th><th>${escapeHtml(t('usage.dashboard.requests'))}</th>`,
+									`<th>${escapeHtml(t('usage.dashboard.input'))}</th><th>${escapeHtml(t('usage.dashboard.cached'))}</th>`,
+									`<th>${escapeHtml(t('usage.dashboard.cacheHit'))}</th><th>${escapeHtml(t('usage.dashboard.output'))}</th>`,
+									`<th>${escapeHtml(t('usage.dashboard.reasoning'))}</th><th>${escapeHtml(t('usage.dashboard.cost'))}</th>`,
+									'</tr></thead><tbody>',
+									...Object.entries(selectedTask.byKind)
+										.sort((a, b) => b[1].requests - a[1].requests)
+										.map(
+											([kind, kindTotals]) =>
+												`<tr><td>${escapeHtml(kind)}</td><td>${kindTotals.requests}</td>` +
+												`<td>${formatNumber(kindTotals.inputTokens)}</td><td>${formatNumber(kindTotals.cachedTokens)}</td>` +
+												`<td>${kindTotals.cacheHitPct.toFixed(1)}%</td><td>${formatNumber(kindTotals.outputTokens)}</td>` +
+												`<td>${formatNumber(kindTotals.reasoningTokens)}</td><td>${formatCost(kindTotals.estimatedCostUsd)}</td></tr>`,
+										),
+									'</tbody></table>',
+									'</div>',
+									'<div class="detail-scroll">',
+									'<table><thead><tr>',
+									`<th>${escapeHtml(t('usage.dashboard.time'))}</th><th>${escapeHtml(t('usage.dashboard.kind'))}</th>`,
+									`<th>${escapeHtml(t('usage.dashboard.input'))}</th><th>${escapeHtml(t('usage.dashboard.cached'))}</th>`,
+									`<th>${escapeHtml(t('usage.dashboard.output'))}</th><th>${escapeHtml(t('usage.dashboard.cost'))}</th>`,
+									'</tr></thead><tbody>',
+									...selectedRequests.map(
+										(record) =>
+											`<tr><td>${escapeHtml(record.timestamp)}</td><td>${escapeHtml(record.requestKind)}</td>` +
+											`<td>${formatNullable(record.promptTokens)}</td><td>${formatNullable(record.cachedInputTokens)}</td>` +
+											`<td>${formatNullable(record.completionTokens)}</td><td>${formatCost(record.estimatedCostUsd ?? 0)}</td></tr>`,
+									),
+									'</tbody></table>',
+									'</div>',
+									`<p><button class="secondary" data-collapse="task">${escapeHtml(t('usage.dashboard.collapse'))}</button></p>`,
+									`</div>`,
+								].join('')
+							: '',
 						`<p><button class="secondary" data-collapse="chat">${escapeHtml(t('usage.dashboard.collapse'))}</button></p>`,
 						`</div>`,
 					].join('')
@@ -570,14 +631,15 @@ export class UsageDashboard {
 			'document.getElementById("refresh").addEventListener("click",()=>vscode.postMessage({command:"refresh"}));',
 			'document.getElementById("exportCsv").addEventListener("click",()=>vscode.postMessage({command:"exportCsv"}));',
 			'document.getElementById("clear").addEventListener("click",()=>vscode.postMessage({command:"clear"}));',
-			'document.querySelectorAll("[data-task]").forEach(el=>{const select=()=>{const id=el.getAttribute("data-task");window.__selectedTask=(window.__selectedTask===id?null:id);vscode.postMessage(current({selectedTaskId:window.__selectedTask}))};el.addEventListener("click",select);el.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();select()}})});',
-			'document.querySelectorAll("[data-chat]").forEach(el=>{const select=()=>{const id=el.getAttribute("data-chat");window.__selectedChat=(window.__selectedChat===id?null:id);vscode.postMessage(current({selectedChatId:window.__selectedChat}))};el.addEventListener("click",select);el.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();select()}})});',
+			'document.querySelectorAll("[data-task]").forEach(el=>{const select=()=>{const id=el.getAttribute("data-task");const chat=el.getAttribute("data-chat-context");if(window.__selectedChat&&chat&&window.__selectedChat!==chat){window.__selectedTask=null;vscode.postMessage(current({selectedChatId:window.__selectedChat,selectedTaskId:null}));return}window.__selectedTask=(window.__selectedTask===id?null:id);vscode.postMessage(current({selectedTaskId:window.__selectedTask}))};el.addEventListener("click",select);el.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();select()}})});',
+			'document.querySelectorAll("[data-chat]").forEach(el=>{const select=()=>{const id=el.getAttribute("data-chat");if(window.__selectedChat&&window.__selectedChat!==id){window.__selectedChat=id;window.__selectedTask=null}else{window.__selectedChat=(window.__selectedChat===id?null:id);if(!window.__selectedChat){window.__selectedTask=null}}vscode.postMessage(current({selectedChatId:window.__selectedChat,selectedTaskId:window.__selectedTask}))};el.addEventListener("click",select);el.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();select()}})});',
 			'document.querySelectorAll("[data-overhead]").forEach(el=>{const toggle=()=>{window.__overheadExpanded=!(window.__overheadExpanded===true);vscode.postMessage(current({overheadExpanded:window.__overheadExpanded}))};el.addEventListener("click",toggle);el.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();toggle()}})});',
 			'document.querySelectorAll("[data-collapse]").forEach(b=>b.addEventListener("click",()=>{const kind=b.getAttribute("data-collapse");if(kind==="task"){window.__selectedTask=null}if(kind==="chat"){window.__selectedChat=null}vscode.postMessage(current({selectedTaskId:window.__selectedTask,selectedChatId:window.__selectedChat}))}));',
 			'document.querySelectorAll("[data-copy]").forEach(b=>b.addEventListener("click",e=>{e.stopPropagation();vscode.postMessage({command:"copy",value:b.getAttribute("data-copy")})}));',
 			'</script>',
 			'</body></html>',
 		].join('');
+		return { html, selectedChatId: effectiveChatId, selectedTaskId: effectiveTaskId };
 	}
 
 	private async refreshPreservingState(): Promise<void> {
@@ -593,7 +655,12 @@ export class UsageDashboard {
 			const contexts = await this.store.readContexts();
 			this.lastSignature = await this.readSignature().catch(() => undefined);
 			this.lastRefreshMs = Date.now();
-			this.panel.webview.html = this.renderDashboard(ledger.records, contexts, this.viewState);
+			// DC-0001: live refreshes reuse the sanitized render result so a
+			// vanished chat/task collapses cleanly instead of showing stale detail.
+			const rendered = this.renderDashboard(ledger.records, contexts, this.viewState);
+			this.viewState.selectedChatId = rendered.selectedChatId;
+			this.viewState.selectedTaskId = rendered.selectedTaskId;
+			this.panel.webview.html = rendered.html;
 			if (ledger.corruptedLines > 0) {
 				logger.warn(
 					`[usage] Ignored ${ledger.corruptedLines} corrupted ledger line(s); history remains readable.`,
@@ -719,6 +786,7 @@ function summaryCard(label: string, value: string): string {
 function taskCard(
 	task: {
 		taskId: string;
+		chatId: string | null;
 		preview: string;
 		projectName: string;
 		requests: number;
@@ -730,8 +798,11 @@ function taskCard(
 	},
 	expanded: boolean,
 ): string {
+	// DC-0001: task cards render only inside their expanded parent chat. Each
+	// card carries its parent chat id so the webview can clear stale task
+	// selections when the user switches chats.
 	return [
-		`<div class="tile" role="listitem" tabindex="0" data-task="${escapeHtml(task.taskId)}" aria-expanded="${expanded ? 'true' : 'false'}" title="${escapeHtml(t('usage.dashboard.expand'))}">`,
+		`<div class="tile" role="listitem" tabindex="0" data-task="${escapeHtml(task.taskId)}" data-chat-context="${escapeHtml(task.chatId ?? '')}" aria-expanded="${expanded ? 'true' : 'false'}" title="${escapeHtml(t('usage.dashboard.expand'))}">`,
 		`<div class="title">${escapeHtml(task.preview || task.taskId.slice(0, 8))}</div>`,
 		`<div class="sub">${escapeHtml(task.projectName)}</div>`,
 		`<div class="metrics"><span>${task.requests} req</span><span>${formatCompact(task.inputTokens)} in</span><span>${task.cacheHitPct.toFixed(1)}% cache</span><span>${formatCompact(task.outputTokens)} out</span></div>`,
@@ -744,24 +815,28 @@ function chatCard(
 	chat: {
 		chatId: string;
 		displayName: string;
+		projectName: string;
 		taskCount: number;
 		requests: number;
 		estimatedCostUsd: number;
 		inputTokens: number;
+		outputTokens: number;
 		cacheHitPct: number;
 	},
-	_tasks: unknown,
 	expanded: boolean,
 ): string {
 	// R12B: the collapsed chat card is the chat-level grouping/subject, not
 	// the native Copilot title. The local subject derives from the first
 	// cleaned human task preview and stays stable for the chat lifetime.
+	// DC-0001: the chat card is the primary dashboard unit — dominant subject
+	// title, project, task/request counts, compact input, cache-hit %, compact
+	// output, and cost. No task cards exist outside an expanded chat.
 	return [
 		`<div class="tile" role="listitem" tabindex="0" data-chat="${escapeHtml(chat.chatId)}" aria-expanded="${expanded ? 'true' : 'false'}" title="${escapeHtml(t('usage.dashboard.expand'))}">`,
-		`<div class="sub">${escapeHtml(t('usage.dashboard.localSubject'))}</div>`,
 		`<div class="title">${escapeHtml(chat.displayName)}</div>`,
+		`<div class="sub">${escapeHtml(chat.projectName)}</div>`,
 		`<div class="sub">${chat.taskCount} tasks · ${chat.requests} requests</div>`,
-		`<div class="metrics"><span>${formatCompact(chat.inputTokens)} in</span><span>${chat.cacheHitPct.toFixed(1)}% cache</span></div>`,
+		`<div class="metrics"><span>${formatCompact(chat.inputTokens)} in</span><span>${chat.cacheHitPct.toFixed(1)}% cache</span><span>${formatCompact(chat.outputTokens)} out</span></div>`,
 		`<div class="cost">${formatCost(chat.estimatedCostUsd)}</div>`,
 		`</div>`,
 	].join('');

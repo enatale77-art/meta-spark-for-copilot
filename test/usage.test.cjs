@@ -23,7 +23,7 @@ const {
 	serializeMarkerPayload,
 	sanitizePromptText,
 } = require('../out/usage/context.js');
-const { usageSignatureChanged, shouldRefreshSignature, nextRefreshDecision } = (() => {
+const { usageSignatureChanged, shouldRefreshSignature, nextRefreshDecision, sanitizeDashboardSelection } = (() => {
 	const Module = require('node:module');
 	const { join } = require('node:path');
 	const stubPath = join(__dirname, 'vscode-stub.cjs');
@@ -1145,5 +1145,113 @@ describe('cross-window sync signatures (R10)', () => {
 		assert.ok(lifecycle.includes('usageService.clearAll()'));
 		const clearBlock = lifecycle.slice(lifecycle.indexOf('setOnCleared'));
 		assert.ok(clearBlock.includes('activeStatusBar'));
+	});
+
+	it('DC-0001: task selection only survives inside its parent chat', () => {
+		const tasks = [
+			{ taskId: 'task-1', chatId: 'chat-a' },
+			{ taskId: 'task-2', chatId: 'chat-a' },
+			{ taskId: 'task-3', chatId: 'chat-b' },
+		];
+		// Same-chat task survives.
+		assert.deepEqual(
+			sanitizeDashboardSelection(
+				{ selectedChatId: 'chat-a', selectedTaskId: 'task-1' },
+				tasks,
+				['chat-a', 'chat-b'],
+			),
+			{ selectedChatId: 'chat-a', selectedTaskId: 'task-1' },
+		);
+		// Switching chats clears the previous task.
+		assert.deepEqual(
+			sanitizeDashboardSelection(
+				{ selectedChatId: 'chat-b', selectedTaskId: 'task-1' },
+				tasks,
+				['chat-a', 'chat-b'],
+			),
+			{ selectedChatId: 'chat-b', selectedTaskId: null },
+		);
+		// Collapsing the chat clears the task.
+		assert.deepEqual(
+			sanitizeDashboardSelection(
+				{ selectedChatId: null, selectedTaskId: 'task-1' },
+				tasks,
+				['chat-a', 'chat-b'],
+			),
+			{ selectedChatId: null, selectedTaskId: null },
+		);
+		// Unknown chat clears everything.
+		assert.deepEqual(
+			sanitizeDashboardSelection(
+				{ selectedChatId: 'chat-gone', selectedTaskId: 'task-1' },
+				tasks,
+				['chat-a', 'chat-b'],
+			),
+			{ selectedChatId: null, selectedTaskId: null },
+		);
+		// Unknown task clears the task but keeps the chat.
+		assert.deepEqual(
+			sanitizeDashboardSelection(
+				{ selectedChatId: 'chat-a', selectedTaskId: 'task-gone' },
+				tasks,
+				['chat-a', 'chat-b'],
+			),
+			{ selectedChatId: 'chat-a', selectedTaskId: null },
+		);
+	});
+
+	it('DC-0001: chat-first render hides top-level tasks and nests diagnostics', () => {
+		const fs = require('node:fs');
+		const path = require('node:path');
+		const dashboard = fs.readFileSync(
+			path.join(__dirname, '..', 'src', 'usage', 'dashboard.ts'),
+			'utf8',
+		);
+		// One Local Chats section; no separate top-level Tasks grid.
+		assert.ok(dashboard.includes("<h3>${escapeHtml(t('usage.dashboard.chats'))}"));
+		assert.ok(!dashboard.includes("<h3>${escapeHtml(t('usage.dashboard.tasks'))} (${tasks.length})</h3>"));
+		// Expanded chat renders summary, nested tasks header, and nested task detail.
+		assert.ok(dashboard.includes('chat-detail'));
+		assert.ok(dashboard.includes('task-detail'));
+		assert.ok(dashboard.includes('data-chat-context'));
+		// Chat card carries project + output; chat detail keeps aggregate metrics.
+		assert.ok(dashboard.includes('usage.dashboard.uncached'));
+		// Aggregation path unchanged.
+		assert.ok(dashboard.includes('rollupTasks('));
+		assert.ok(dashboard.includes('rollupChats('));
+		assert.ok(dashboard.includes('rollupUnassignedOverhead('));
+	});
+
+	it('DC-0001: one chat with one task aggregates identically at chat and task level', () => {
+		const records = [makeRecord({ taskId: 'task-1', chatId: 'chat-1', taskPreview: 'Solo' })];
+		const tasks = rollupTasks(records);
+		const chats = rollupChats(tasks);
+		assert.equal(tasks.length, 1);
+		assert.equal(chats.length, 1);
+		assert.equal(chats[0].taskCount, 1);
+		assert.equal(chats[0].requests, tasks[0].requests);
+		assert.equal(chats[0].inputTokens, tasks[0].inputTokens);
+		assert.equal(chats[0].estimatedCostUsd, tasks[0].estimatedCostUsd);
+	});
+
+	it('DC-0001: one chat with three tasks shows one chat card with three nested tasks', () => {
+		const now = Date.now();
+		const records = [1, 2, 3].map((n) =>
+			makeRecord({
+				taskId: `task-${n}`,
+				chatId: 'chat-1',
+				timestampMs: now + n,
+				taskPreview: `Task ${n}`,
+			}),
+		);
+		const tasks = rollupTasks(records);
+		const chats = rollupChats(tasks);
+		assert.equal(chats.length, 1);
+		assert.equal(chats[0].taskCount, 3);
+		assert.equal(tasks.filter((task) => task.chatId === 'chat-1').length, 3);
+		assert.equal(
+			tasks.reduce((sum, task) => sum + task.requests, 0),
+			chats[0].requests,
+		);
 	});
 });

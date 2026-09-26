@@ -43,14 +43,14 @@ Adds **Muse Spark 1.3** (plus 1.2, 1.1, and discounted Contributor variants) to 
 
 Local-first per-task Muse usage accounting, captured from Meta's returned usage object — no proxy, no cloud sync, no telemetry.
 
-- Command Palette → **Meta Spark: Open Usage Dashboard** — summary cards (requests, input, cached, output, cache-hit %, estimated cost), 7d/30d/90d/All + project/model filters, task rollups with request timelines and request-kind breakdowns, local-chat roll-up, and copyable IDs.
+- Command Palette → **Meta Spark: Open Usage Dashboard** — summary cards (requests, input, cached, output, cache-hit %, estimated cost), 7d/30d/90d/All + project/model filters, and a chat-first hierarchy (Project → Local Chat → Task → Request): Local Chat cards are the default view, Tasks open inside their chat, and request timelines with request-kind breakdowns and copyable IDs render inside the selected task.
 - Command Palette → **Meta Spark: Export Usage CSV** — request-granularity rows saved to a location you choose.
 - Command Palette → **Meta Spark: Clear Usage History** — confirmation-gated; deletes only usage-monitor data.
 - Status bar shows the most recent tracked task in the active workspace (request/token/cost); click opens the dashboard. Disable with `meta-spark-copilot.usageMonitor.statusBar`.
 
 What is stored locally (under `<globalStorageUri>/usage-v1/` as `requests.jsonl` + `contexts.json`): timestamps, project/chat/task IDs, model IDs, request kind/initiator, reasoning effort, token counts (prompt, cached, uncached, completion, reasoning, total), estimated USD cost + pricing source, duration, status, and a capped 160-character task preview. Full prompts, source files, tool arguments/results, reasoning/response text, request/response bodies, filesystem paths, and API keys are never stored. Costs are estimates from the extension's `MODELS` catalog, not billing invoices.
 
-Local Chat IDs and Task IDs are owned by this extension for grouping (hierarchy: Request → Task → Local Chat → Project). A Local Chat ID is not GitHub Copilot's native session ID, and v1 cannot deep-link to the exact native Copilot chat. Each Local Chat card shows an explicit local Subject derived from the first cleaned human task preview (stable for the chat lifetime); it is not the native Copilot session title. Uncorrelated utility/background requests are recorded as unassigned Copilot overhead rather than guessed into a chat.
+Local Chat IDs and Task IDs are owned by this extension for grouping (hierarchy: Project → Local Chat → Task → Request). A Local Chat ID is not GitHub Copilot's native session ID, and v1 cannot deep-link to the exact native Copilot chat. Each Local Chat card shows an explicit local Subject derived from the first cleaned human task preview (stable for the chat lifetime); it is not the native Copilot session title. Uncorrelated utility/background requests are recorded as unassigned Copilot overhead rather than guessed into a chat.
 
 ## Pricing and limits
 
@@ -105,7 +105,7 @@ The output lands in `dist/`.
 
 - Versioning is manual. The extension version lives in `package.json` (`version`). See `docs/RELEASE.md` for the full guide.
 - `feat:`-sized additions (new model checkpoints, new tiers, new capabilities) bump the **minor** version. Breaking changes to settings or model IDs bump the **major** version. `fix:`-sized changes bump the **patch** version.
-- This release is **2.2.0** (minor): it adds the local-first Muse per-task usage monitor (dashboard, CSV export, status bar, clear-history) without breaking existing models or settings.
+- This release is **2.2.1** (patch): chat-first usage dashboard presentation (Local Chat as the primary unit, Tasks inside their chat). The **2.2.0** (minor) release added the local-first Muse per-task usage monitor (dashboard, CSV export, status bar, clear-history) without breaking existing models or settings.
 - To release: bump `version` in `package.json`, add a `CHANGELOG.md` entry, build and test (`npm run package`), then publish with `vsce` / `ovsx` and tag the release on GitHub.
 
 ## License
