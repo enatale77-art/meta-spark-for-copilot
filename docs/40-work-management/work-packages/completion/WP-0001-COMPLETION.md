@@ -880,3 +880,27 @@ All R12 findings repaired in scope; revalidation complete.
   `vsce ls` confirms test artifacts stay out of the VSIX.
   ACTIVE returned to COMPLETE - PENDING REVIEW; branch pushed and verified in
   sync with remote. Live smoke retest still required before merge.
+
+
+## Engineering Manager Review 07 — 2026-09-25
+
+**Disposition:** SOURCE REVIEW PASS — ready for final live smoke; do not merge until the live smoke passes.
+
+Review of repair commit `928cdd4f09d1ffe096d59ef6aca072aff30f5c93` confirms the user-visible R12 defects are repaired:
+
+- R12A: `sanitizePromptText()` strips Copilot `<reminderInstructions>...</reminderInstructions>` case-insensitively, including defensive hyphen/underscore tag variants, before substantive-turn detection and task preview generation. Reminder-only messages remain non-substantive; mixed reminder/context + `userRequest` input resolves to the human prompt.
+- R12B: collapsed Local Chat cards now explicitly label the extension-owned **Local subject** above the stable chat display name. Expanded chat detail repeats the Local subject and clearly states that it is derived from the first cleaned human task preview and is not the native Copilot session title.
+- The subject remains stable for the Local Chat lifetime; later task previews do not overwrite it.
+- The existing R7 correlation architecture remains intact.
+
+Reported validation is internally consistent: 44/44 deterministic tests pass, compile/lint pass, relevant source formatting passes, and the rebuilt `2.2.0` VSIX SHA256 is `BCD93AAA4D47C0CBE877956FCA0898A32EEAEAD4AFEBE1B81BB81D27ACC3283B`.
+
+**Remaining gate:** one final live smoke with this exact VSIX. Clear prior smoke data first. Pass requires:
+1. first multi-step prompt → one Task / one Local Chat with multiple requests;
+2. Task title = cleaned human prompt (no `reminderInstructions`);
+3. Local Chat card visibly shows a Local subject derived from that prompt;
+4. second human prompt in the same Copilot chat → two Tasks / one Local Chat while the Local subject stays unchanged;
+5. selected filters/expanded-card state survive live updates;
+6. second VS Code window auto-syncs without manual Refresh.
+
+If these pass, WP-0001 may proceed directly to routine integration under delegated authority.
