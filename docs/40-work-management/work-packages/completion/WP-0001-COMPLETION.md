@@ -4,7 +4,7 @@
 **Branch:** `wp/0001-muse-usage-monitor`
 **Date:** 2026-09-25
 **Version:** 2.2.0 (additive minor release)
-**Status:** COMPLETE - PENDING REVIEW
+**Status:** ACCEPTED - READY FOR INTEGRATION
 
 ## Summary
 
@@ -904,3 +904,24 @@ Reported validation is internally consistent: 44/44 deterministic tests pass, co
 6. second VS Code window auto-syncs without manual Refresh.
 
 If these pass, WP-0001 may proceed directly to routine integration under delegated authority.
+
+
+## Final Live Copilot Smoke / Engineering Manager Acceptance — 2026-09-25
+
+**Disposition:** PASS — WP-0001 accepted for routine integration.
+
+The Product Owner reported the final packaged 2.2.0 live smoke as **PASS** after the R12 repair. This closes the remaining end-to-end acceptance gate.
+
+Accepted live behavior includes the final criteria carried forward from Reviews 05–07:
+
+- multi-step GitHub Copilot Agent work remains correlated as one Task with multiple Muse requests;
+- a second human prompt in the same Copilot chat becomes a second Task under the same Local Chat;
+- Task titles use cleaned human prompt text rather than Copilot-generated prompt scaffolding;
+- Local Chat cards expose a stable extension-owned Local subject;
+- card-first summary UI remains the default with dense diagnostics behind expansion;
+- project/model/time filtering and expanded-card state survive live updates;
+- a second VS Code window automatically reconciles the shared usage ledger without manual Refresh.
+
+The final accepted package remains `dist/meta-spark-for-copilot-2.2.0.vsix`, SHA256 `BCD93AAA4D47C0CBE877956FCA0898A32EEAEAD4AFEBE1B81BB81D27ACC3283B`.
+
+WP-0001 is technically accepted. Routine integration to `main` is authorized under delegated project governance; no separate merge-approval ceremony is required.
