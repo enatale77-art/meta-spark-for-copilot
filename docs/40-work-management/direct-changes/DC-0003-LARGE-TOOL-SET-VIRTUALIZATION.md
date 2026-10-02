@@ -4,6 +4,7 @@
 **Branch:** `fix/large-tool-sets` (from `main` @ `88180ff`)  
 **PR:** #4 (draft)  
 **Date:** 2026-10-01  
+**Target version:** 2.2.2  
 **Status:** COMPLETE - PENDING REVIEW
 
 ## Intent
@@ -125,7 +126,7 @@ Regression coverage (requested matrix):
 - A discovery round changes the tool prefix, which costs one prompt-cache miss for that round. Loaded tools then persist, so later turns are stable.
 - If the model calls the loader on the final allowed round (it is not offered there), the call is dropped and the response ends. This is logged as `continued=false`.
 - Agent Host deferral would become native if Copilot added Muse to its tool-search allowlist or forwarded `toolCalling`. The provider-side path would then simply go unused, because Copilot would supply 128 or fewer tools.
-- Not packaged, installed, or published. No version bump; the changelog entry is under `Unreleased`.
+- Packaged as 2.2.2 (see Release Packaging) but not installed or published to Marketplace/Open VSX.
 
 ## Changed files
 
@@ -134,5 +135,16 @@ Regression coverage (requested matrix):
 - `src/provider/replay/consts.ts`, `index.ts`, `markers.ts`, `types.ts`
 - `src/provider/debug/diagnostics.ts` (marker-report reason), `src/provider/debug/dump.ts` (dump fix)
 - `src/usage/pricing.ts` (`sumMetaUsage`)
-- `test/tools.test.cjs`, `test/provider-tools.integration.test.cjs`, `test/vscode-lm-stub.cjs` (new); `package.json` (test script only)
-- `CHANGELOG.md` (Unreleased), `docs/notices/tool-drift.en.md`, `docs/notices/tool-drift.zh.md`
+- `test/tools.test.cjs`, `test/provider-tools.integration.test.cjs`, `test/vscode-lm-stub.cjs` (new); `package.json` (test script; version 2.2.2), `package-lock.json` (root version fields only)
+- `CHANGELOG.md` (2.2.2), `docs/notices/tool-drift.en.md`, `docs/notices/tool-drift.zh.md`
+
+## Release Packaging — 2026-10-01
+
+- Version bumped `2.2.1` → `2.2.2` in `package.json` and both root version fields of `package-lock.json`; no dependency versions changed.
+- `CHANGELOG.md` section `Unreleased` renamed to `2.2.2`.
+- `npm test`: 85 / 85 pass.
+- `npm run lint` (oxlint): 0 warnings, 0 errors.
+- `npm run package`: `dist/meta-spark-for-copilot-2.2.2.vsix` (84 files, 417,774 bytes). It contains `out/provider/tools/virtual.js` and no test files.
+- VSIX SHA256: `5D3A6B63162C70C3679CCD6708C836D29ECFC8F119555CF37B40BAA46DEB14F6`
+- `dist/` is gitignored, so the VSIX itself is not committed.
+- Not installed. Not published to Marketplace or Open VSX. PR #4 stays draft pending Engineering Manager review.
