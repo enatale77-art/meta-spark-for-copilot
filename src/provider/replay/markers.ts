@@ -4,9 +4,11 @@ import {
 	BASE64URL_PATTERN,
 	ENCODED_JSON_MARKER_PREFIX,
 	LEGACY_SEGMENT_ID_PATTERN,
+	MAX_MARKER_LOADED_TOOLS,
 	REPLAY_MARKER_MIME,
 	REPLAY_MARKER_PREFIXES,
 	REPLAY_MARKER_WRITER_ID,
+	TOOL_NAME_PATTERN,
 } from './consts';
 import type {
 	LocatedReplayMarker,
@@ -52,7 +54,8 @@ export function hasReplayMarkerMetadata(metadata: ReplayMarkerMetadata): boolean
 		metadata.visionText ||
 		metadata.reasoningText ||
 		metadata.usage?.chatId ||
-		metadata.usage?.taskId,
+		metadata.usage?.taskId ||
+		metadata.loadedTools?.length,
 	);
 }
 
@@ -64,6 +67,7 @@ export function createReplayMarkerPart(
 		...createVisionMarkerPayload(metadata.visionText),
 		...createReasoningMarkerPayload(metadata.reasoningText),
 		...createUsageMarkerPayload(metadata.usage),
+		...createToolsMarkerPayload(metadata.loadedTools),
 	});
 	const writerPrefix = prefix && prefix.length > 0 ? prefix : REPLAY_MARKER_WRITER_ID;
 	return new vscode.LanguageModelDataPart(
@@ -114,6 +118,7 @@ export function parseReplayMarkerData(data: Uint8Array): ReplayMarkerParseResult
 		const vision = parseVisionMarkerMetadata(value);
 		const reasoning = parseReasoningMarkerMetadata(value);
 		const usage = parseUsageMarkerMetadata(value);
+		const loadedTools = parseToolsMarkerMetadata(value);
 		return {
 			valid: true,
 			segmentId: segmentId.value,
@@ -123,6 +128,7 @@ export function parseReplayMarkerData(data: Uint8Array): ReplayMarkerParseResult
 				? { usageChatId: usage.usageChatId, usageTaskId: usage.usageTaskId }
 				: {}),
 			...(usage.usageIgnoredReason ? { usageIgnoredReason: usage.usageIgnoredReason } : {}),
+			...(loadedTools ? { loadedTools } : {}),
 			legacySegmentOnly: Boolean(
 				segmentId.value && !vision.visionText && !reasoning.reasoningText && !usage.usageChatId,
 			),
@@ -224,6 +230,42 @@ function parseUsageMarkerMetadata(value: object): {
 		usageChatId: (record.chatId as string).toLowerCase(),
 		usageTaskId: (record.taskId as string).toLowerCase(),
 	};
+}
+
+function createToolsMarkerPayload(loadedTools: readonly string[] | undefined): object {
+	return loadedTools?.length
+		? { tools: { loaded: loadedTools.slice(0, MAX_MARKER_LOADED_TOOLS) } }
+		: {};
+}
+
+function parseToolsMarkerMetadata(value: object): string[] | undefined {
+	const tools = (value as { tools?: unknown }).tools;
+	if (!tools || typeof tools !== 'object' || Array.isArray(tools)) {
+		return undefined;
+	}
+	const loaded = (tools as { loaded?: unknown }).loaded;
+	if (!Array.isArray(loaded)) {
+		return undefined;
+	}
+	const names = loaded
+		.filter((name): name is string => typeof name === 'string' && TOOL_NAME_PATTERN.test(name))
+		.slice(0, MAX_MARKER_LOADED_TOOLS);
+	return names.length > 0 ? names : undefined;
+}
+
+/** Most recent loaded-tool set persisted by a replay marker anywhere in the conversation. */
+export function findLatestLoadedTools(
+	messages: readonly vscode.LanguageModelChatRequestMessage[],
+): string[] {
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		for (const part of messages[index].content) {
+			const loadedTools = parseReplayMarkerPart(part)?.loadedTools;
+			if (loadedTools) {
+				return loadedTools;
+			}
+		}
+	}
+	return [];
 }
 
 function parseReasoningMarkerMetadata(value: object): {

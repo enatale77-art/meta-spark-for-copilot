@@ -45,6 +45,23 @@ export function splitUsageTokens(usage: MetaUsage): UsageTokens {
 	};
 }
 
+/**
+ * Combines the usage of several Meta requests made for one provider call
+ * (tool discovery rounds) so the call is recorded and billed exactly once.
+ */
+export function sumMetaUsage(a: MetaUsage, b: MetaUsage): MetaUsage {
+	const left = splitUsageTokens(a);
+	const right = splitUsageTokens(b);
+	return {
+		prompt_tokens: left.promptTokens + right.promptTokens,
+		completion_tokens: left.completionTokens + right.completionTokens,
+		total_tokens: left.totalTokens + right.totalTokens,
+		prompt_tokens_details: { cached_tokens: left.cachedTokens + right.cachedTokens },
+		completion_tokens_details: { reasoning_tokens: left.reasoningTokens + right.reasoningTokens },
+		prompt_cache_miss_tokens: left.uncachedTokens + right.uncachedTokens,
+	};
+}
+
 export function resolvePricing(input: {
 	vscodeModelId: string;
 	apiModelId?: string;

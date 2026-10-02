@@ -224,7 +224,7 @@ export interface ReplayMarkerReportInfo {
 	markerBytes?: number;
 	visionTextChars?: number;
 	reasoningTextChars?: number;
-	reason?: 'cancelled' | 'stream-error' | 'no-replay-data';
+	reason?: 'cancelled' | 'stream-error' | 'no-replay-data' | 'tool-discovery-round';
 	error?: unknown;
 }
 

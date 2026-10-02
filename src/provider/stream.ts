@@ -17,9 +17,18 @@ import type { PreparedChatRequest } from './request';
 
 interface ResponseStreamState {
 	accumulatedReasoning: string;
+	roundReasoning: string;
+	roundContent: string;
 	emittedToolCallIds: string[];
 	initialResponseNoticeReported: boolean;
 	replayMarkerReported: boolean;
+	loadedToolNames?: () => readonly string[] | undefined;
+}
+
+export interface StreamRoundOutcome {
+	content: string;
+	reasoning: string;
+	emittedToolCalls: number;
 }
 
 const COPILOT_USAGE_DATA_PART_MIME = 'usage';
@@ -34,6 +43,13 @@ export interface StreamChatCompletionOptions {
 	usageHooks?: {
 		onUsage?: (usage: MetaUsage, info: { durationMs: number }) => void;
 	};
+	/** Reasoning already streamed by earlier rounds of this provider call. */
+	seedReasoning?: string;
+	/** Returns true when a tool call is provider-internal and must not reach the host. */
+	toolCallInterceptor?: (toolCall: MetaToolCall) => boolean;
+	/** Returns true when this round continues internally, so the replay marker waits for the final round. */
+	deferReplayMarker?: (emittedToolCalls: number) => boolean;
+	loadedToolNames?: () => readonly string[] | undefined;
 }
 
 export function streamChatCompletion({
@@ -44,12 +60,19 @@ export function streamChatCompletion({
 	getCharsPerToken,
 	setCharsPerToken,
 	usageHooks,
-}: StreamChatCompletionOptions): Promise<void> {
+	seedReasoning,
+	toolCallInterceptor,
+	deferReplayMarker,
+	loadedToolNames,
+}: StreamChatCompletionOptions): Promise<StreamRoundOutcome> {
 	const state: ResponseStreamState = {
-		accumulatedReasoning: '',
+		accumulatedReasoning: seedReasoning ?? '',
+		roundReasoning: '',
+		roundContent: '',
 		emittedToolCallIds: [],
 		initialResponseNoticeReported: false,
 		replayMarkerReported: false,
+		loadedToolNames,
 	};
 	const streamStartedAtMs = Date.now();
 	const cancelListener = observeCancellationToken(token, prepared.cacheDiagnostics);
@@ -60,6 +83,7 @@ export function streamChatCompletion({
 			{
 				onContent: (content: string) => {
 					reportInitialResponseNoticeOnce(progress, state, initialResponseNotice);
+					state.roundContent += content;
 					progress.report(new vscode.LanguageModelTextPart(content));
 				},
 
@@ -70,6 +94,9 @@ export function streamChatCompletion({
 				},
 
 				onToolCall: (toolCall: MetaToolCall) => {
+					if (toolCallInterceptor?.(toolCall)) {
+						return;
+					}
 					reportInitialResponseNoticeOnce(progress, state, initialResponseNotice);
 					handleToolCall(toolCall, state, progress);
 				},
@@ -79,7 +106,16 @@ export function streamChatCompletion({
 				},
 
 				onDone: () => {
-					reportReplayMarkerOnce(prepared, progress, state, 'done');
+					if (deferReplayMarker?.(state.emittedToolCallIds.length)) {
+						state.replayMarkerReported = true;
+						prepared.cacheDiagnostics.onReplayMarkerReport({
+							status: 'skipped',
+							trigger: 'done',
+							reason: 'tool-discovery-round',
+						});
+					} else {
+						reportReplayMarkerOnce(prepared, progress, state, 'done');
+					}
 					finalizeReplayDiagnostics(
 						prepared.trailingToolResultIds,
 						state,
@@ -117,10 +153,15 @@ export function streamChatCompletion({
 			);
 			throw error;
 		})
-		.then(() => {
+		.then((): StreamRoundOutcome => {
 			if (token.isCancellationRequested) {
 				reportSkippedReplayMarkerIfNeeded(prepared, state, 'cancelled');
 			}
+			return {
+				content: state.roundContent,
+				reasoning: state.roundReasoning,
+				emittedToolCalls: state.emittedToolCallIds.length,
+			};
 		})
 		.finally(() => {
 			cancelListener.dispose();
@@ -229,6 +270,7 @@ function getReplayMarkerMetadata(
 					},
 				}
 			: {}),
+		loadedTools: state.loadedToolNames?.(),
 	};
 }
 
@@ -238,6 +280,7 @@ function handleThinking(
 	progress: vscode.Progress<vscode.LanguageModelResponsePart>,
 ): void {
 	state.accumulatedReasoning += text;
+	state.roundReasoning += text;
 	progress.report(
 		new vscode.LanguageModelThinkingPart(text) as unknown as vscode.LanguageModelResponsePart,
 	);

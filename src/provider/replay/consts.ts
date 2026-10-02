@@ -10,3 +10,5 @@ export const ENCODED_JSON_MARKER_PREFIX = 'json:';
 export const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
 export const LEGACY_SEGMENT_ID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const TOOL_NAME_PATTERN = /^[A-Za-z0-9_.:-]{1,128}$/;
+export const MAX_MARKER_LOADED_TOOLS = 256;
