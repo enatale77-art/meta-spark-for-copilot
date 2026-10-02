@@ -2,6 +2,7 @@
 import {
 	aggregateRequests,
 	filterByTime,
+	filterThisMonth,
 	rollupChats,
 	rollupTasks,
 	rollupUnassignedOverhead,
@@ -12,7 +13,7 @@ import { logger } from '../logger';
 import type { UsageRequestRecord } from './types';
 import type { UsageStore } from './storage';
 
-export type UsagePeriod = '7d' | '30d' | '90d' | 'all';
+export type UsagePeriod = 'month' | '7d' | '30d' | '90d' | 'all';
 
 export interface UsageDashboardState {
 	period: UsagePeriod;
@@ -429,8 +430,15 @@ export class UsageDashboard {
 		},
 		state: UsageDashboardState,
 	): { html: string; selectedChatId: string | null; selectedTaskId: string | null } {
-		const periodDays = state.period === 'all' ? null : Number.parseInt(state.period, 10);
-		let records = filterByTime(allRecords, Date.now(), periodDays);
+		const nowMs = Date.now();
+		const periodDays =
+			state.period === 'all' || state.period === 'month'
+				? null
+				: Number.parseInt(state.period, 10);
+		let records =
+			state.period === 'month'
+				? filterThisMonth(allRecords, nowMs)
+				: filterByTime(allRecords, nowMs, periodDays);
 		if (state.projectId !== 'all') {
 			records = records.filter((record) => record.projectId === state.projectId);
 		}
@@ -524,7 +532,7 @@ export class UsageDashboard {
 			`<h2>${escapeHtml(t('usage.dashboard.title'))}</h2>`,
 			`<div class="toolbar">`,
 			`<label>${escapeHtml(t('usage.dashboard.period'))} <select id="period">`,
-			renderOptions(['7d', '30d', '90d', 'all'], state.period),
+			renderOptions(['month', '7d', '30d', '90d', 'all'], state.period),
 			`</select></label>`,
 			`<label>${escapeHtml(t('usage.dashboard.project'))} <select id="projectId">`,
 			`<option value="all">${escapeHtml(t('usage.dashboard.all'))}</option>`,
@@ -832,15 +840,15 @@ export class UsageDashboard {
 }
 
 function toPeriod(value: unknown): UsagePeriod {
-	return value === '7d' || value === '30d' || value === '90d' || value === 'all' ? value : '30d';
+	return value === 'month' || value === '7d' || value === '30d' || value === '90d' || value === 'all' ? value : '30d';
 }
 
 function renderOptions(options: string[], selected: string): string {
 	return options
-		.map(
-			(option) =>
-				`<option value="${option}"${option === selected ? ' selected' : ''}>${option}</option>`,
-		)
+		.map((option) => {
+			const label = option === 'month' ? t('usage.dashboard.thisMonth') : option;
+			return `<option value="${option}"${option === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+		})
 		.join('');
 }
 
