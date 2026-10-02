@@ -799,7 +799,7 @@ describe('status selection', () => {
 				projectName: 'A',
 				taskId: 'task-old',
 				chatId: 'chat-old',
-				timestampMs: now - 1000,
+				timestampMs: now,
 			}),
 		];
 		const selected = selectStatusTask({
