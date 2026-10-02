@@ -2,10 +2,10 @@
 
 **Type:** Lightweight Direct Change (compatibility repair)  
 **Branch:** `fix/large-tool-sets` (from `main` @ `88180ff`)  
-**PR:** #4 (draft)  
+**PR:** #4  
 **Date:** 2026-10-01  
 **Target version:** 2.2.2  
-**Status:** COMPLETE - PENDING REVIEW
+**Status:** COMPLETE - INTEGRATED WITH PR #3 FOR 2.2.2
 
 ## Intent
 
@@ -82,7 +82,7 @@ Unchanged: model catalog and `toolCalling: 128` advertisement; Muse Spark 1.1/1.
 
 ## Validation
 
-- `npm test`: **85 / 85 pass**, made up of:
+- `npm test` (on this branch before integration with PR #3): **85 / 85 pass**, made up of:
   - 51 existing tests;
   - 31 new unit tests in `test/tools.test.cjs`;
   - 3 new loopback integration tests in `test/provider-tools.integration.test.cjs`.
@@ -138,13 +138,20 @@ Regression coverage (requested matrix):
 - `test/tools.test.cjs`, `test/provider-tools.integration.test.cjs`, `test/vscode-lm-stub.cjs` (new); `package.json` (test script; version 2.2.2), `package-lock.json` (root version fields only)
 - `CHANGELOG.md` (2.2.2), `docs/notices/tool-drift.en.md`, `docs/notices/tool-drift.zh.md`
 
-## Release Packaging — 2026-10-01
+## Release Packaging — 2026-10-01 (integrated with PR #3)
 
-- Version bumped `2.2.1` → `2.2.2` in `package.json` and both root version fields of `package-lock.json`; no dependency versions changed.
-- `CHANGELOG.md` section `Unreleased` renamed to `2.2.2`.
-- `npm test`: 85 / 85 pass.
+The first 2.2.2 package built on this branch predated PR #3 (usage periods, persistent accounting, Restore History) and was discarded, including its SHA-256. The artifact below was built from the integrated tree after PR #3 was merged into `main` (merge commit `09bcdfa`) and `main` was merged into this branch (`ebd1b28`).
+
+- Version `2.2.2` in `package.json` and both root version fields of `package-lock.json`; no dependency versions changed.
+- `CHANGELOG.md`: one combined `2.2.2` section (usage/UI/history changes plus this fix); no `Unreleased` section.
+- Integration conflicts: `CHANGELOG.md` only (resolved by combining). `package.json` merged cleanly and keeps the `meta-spark.restoreUsageHistory` command and the expanded test script (`usage`, `tools`, `provider-tools.integration`).
+- `npm test`: 98 / 98 pass (usage 64, tool virtualization 31, provider integration 3).
 - `npm run lint` (oxlint): 0 warnings, 0 errors.
-- `npm run package`: `dist/meta-spark-for-copilot-2.2.2.vsix` (84 files, 417,774 bytes). It contains `out/provider/tools/virtual.js` and no test files.
-- VSIX SHA256: `5D3A6B63162C70C3679CCD6708C836D29ECFC8F119555CF37B40BAA46DEB14F6`
+- `npm run format:check`: reports every `src/` file under the Windows `core.autocrlf=true` CRLF checkout (64 on `main`, 65 here because `virtual.ts` is new); not a regression and the repo does not gate on it.
+- Request dumps re-verified on the integrated tree with `debugMode=verbose` against the loopback provider test: 15 dump files written, no `write failed` entries.
+- Source commit packaged: `ebd1b289eb294db9d057dc9b97d44cf2a965307e` (clean working tree). Later commits on this branch are documentation only.
+- `npm run package`: `dist/meta-spark-for-copilot-2.2.2.vsix`, 84 files, 422,228 bytes.
+- VSIX SHA-256: `E2D98621864BD57A713F679126D3F422FDC80986533FA4366A29DD4CF994C618`
+- Verified inside the VSIX: `package.json` version 2.2.2; `meta-spark.restoreUsageHistory` in `package.json`, `package.nls.json`, and `out/runtime/commands.js`; Restore History and `1d`/month period code in `out/usage/`; `out/provider/tools/virtual.js` present; combined 2.2.2 changelog; no `src/`, `test/`, `docs/`, `.ts`, or source-map files.
 - `dist/` is gitignored, so the VSIX itself is not committed.
-- Not installed. Not published to Marketplace or Open VSX. PR #4 stays draft pending Engineering Manager review.
+- Not installed. Not published to Marketplace or Open VSX.
