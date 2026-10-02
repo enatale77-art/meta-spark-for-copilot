@@ -34,6 +34,7 @@ export class UsageStatusBar {
 				return;
 			}
 			const ledger = await this.store.readRequests();
+			const historyCutoffMs = await this.store.readHistoryCutoff();
 			const workspaceUris = (vscode.workspace.workspaceFolders ?? []).map((folder) =>
 				folder.uri.toString(),
 			);
@@ -41,6 +42,7 @@ export class UsageStatusBar {
 				records: ledger.records,
 				workspaceUris,
 				nowMs: Date.now(),
+				hiddenBeforeMs: historyCutoffMs,
 			});
 			if (!latest) {
 				this.item.text = t('usage.status.empty');
