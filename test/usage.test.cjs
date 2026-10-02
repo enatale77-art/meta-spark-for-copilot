@@ -790,6 +790,28 @@ describe('status selection', () => {
 		assert.equal(selected.taskRecords.length, 1);
 	});
 
+	it('status bar hides records at or before the visible-history cutoff', () => {
+		const now = Date.now();
+		const projectA = deriveProjectId(['file:///a']).projectId;
+		const records = [
+			makeRecord({
+				projectId: projectA,
+				projectName: 'A',
+				taskId: 'task-old',
+				chatId: 'chat-old',
+				timestampMs: now - 1000,
+			}),
+		];
+		const selected = selectStatusTask({
+			records,
+			workspaceUris: ['file:///a'],
+			nowMs: now,
+			hiddenBeforeMs: now,
+		});
+		assert.equal(selected.latest, undefined);
+		assert.deepEqual(selected.taskRecords, []);
+	});
+
 	it('status bar shows empty when the active workspace has no usage', () => {
 		const now = Date.now();
 		const projectB = deriveProjectId(['file:///b']).projectId;
