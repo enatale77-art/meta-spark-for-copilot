@@ -8,7 +8,7 @@
 
 **Target version:** 2.2.3 (first candidate installed by the user; second candidate packaged below, not installed)
 
-**Status:** SECOND 2.2.3 LIVE-TEST CANDIDATE PACKAGED — AWAITING PRODUCT OWNER INSTALLATION; DO NOT MERGE OR PUBLISH
+**Status:** COMPLETE / ACCEPTED — Product Owner live verification passed on the installed second 2.2.3 candidate (2026-10-02); merged via PR #5.
 
 The initial-candidate sections below are historical. The **2026-10-02 live regression investigation** at the end supersedes their assumed SDK marker round trip and records the two installed-candidate findings. Version remains 2.2.3.
 
@@ -208,3 +208,23 @@ Fresh VSIX evidence:
 Opened and checked the produced archive; package `version` is `2.2.3`. Compiled content confirms Agent Host `<session_context>`/session-folder parsing, deterministic chat/task IDs and recorder fallback; the Agent Host classifier prefix; English and Chinese workspace-scoped status copy; Restore History; `1D` and `This month`; and the existing compiled tool-search virtualization module. `npm run package` completed successfully via `npm.cmd run package` and its normal prepublish compile.
 
 The first candidate's SHA-256 `D22C7FD4BD22FFE88736B68AD1A897EA8F35F0270748343B8AF4DAA0C616F2FF` is obsolete. The newly packaged bytes hash to the different SHA-256 above. No install was performed. The fresh VSIX is ready for Product Owner installation and live verification; PR #5 remains open and unmerged, and nothing was published.
+
+## Final Live Verification — ACCEPTED 2026-10-02
+
+**Date:** 2026-10-02 (Product Owner report; Engineering Manager acceptance to close PR #5).
+
+**Installed candidate:** 2.2.3, second live-test candidate (`dist/meta-spark-for-copilot-2.2.3.vsix`, SHA-256 `009D486113BAC26B0521E77E6A0483898A122F08FD6DF1421F6288FA55C27CA6`, packaged from source HEAD `f97eeed72ce0e72a848f336193b6f6f9206a4c44` plus the docs-only candidate record `86d254d`). No new version bump; earlier ledger rows from the failed candidates are retained unchanged.
+
+**Acceptance:** Product Owner completed the required real installed live verification and reports everything appears to be working correctly. No remaining blocking issue in the live test.
+
+**Live behaviors verified:**
+
+- Agent Host requests no longer land entirely in Unassigned overhead.
+- One native Agent Host conversation now remains one Local Chat instead of splitting each provider call into a separate chat.
+- Multiple human prompts in the same native chat create separate Tasks under the same Local Chat.
+- Tool-loop/provider continuation stays associated with the active task.
+- The >128-tool Muse/Copilot fix remains operational in real use.
+- Usage dashboard/history features continue to work.
+- Workspace-scoped status behavior is now understood/correctly communicated.
+
+**Residual risks (non-blocking):** the standing notes above still apply — session-folder/human-timestamp fields are SDK prompt internals (fallback is fresh allocation, never merging by prompt/project/tool list/proximity); marker emission success is distinct from bridge/SDK echo and the repaired path does not depend on that round trip; status stays workspace scoped by design.
