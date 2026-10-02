@@ -2,6 +2,7 @@ export { REPLAY_MARKER_MIME } from './consts';
 export {
 	createReplayMarkerPart,
 	findFirstReplayMarker,
+	findLatestLoadedTools,
 	hasReplayMarkerMetadata,
 	parseFirstReplayMarker,
 	parseReplayMarkerData,

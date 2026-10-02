@@ -1,20 +1,29 @@
 import vscode from 'vscode';
 import { AuthManager } from '../auth';
-import { getApiModelId, getStabilizeToolListEnabled } from '../config';
+import { getApiModelId, getDebugLoggingEnabled, getStabilizeToolListEnabled } from '../config';
 import { MODELS } from '../consts';
 import { t } from '../i18n';
 import { logger } from '../logger';
+import type { MetaUsage } from '../types';
 import type { UsageService, PendingUsageRequest } from '../usage';
+import { sumMetaUsage } from '../usage/pricing';
 import { getConfiguredThinkingEffort } from './models';
 import { createCacheDiagnosticsRecorder, dumpProviderInput } from './debug';
 import { toChatInfo } from './models';
 import { BalanceCurrencyResolver } from './pricing/currency';
 import { prepareChatRequest } from './request';
-import { classifyProviderRequest } from './routing';
+import { findLatestLoadedTools } from './replay';
+import { classifyProviderRequest, formatRequestLogLine } from './routing';
 import { resolveConversationSegment } from './segment';
 import { streamChatCompletion } from './stream';
 import { estimateTokenCount } from './tokens';
 import { processToolFlow } from './tools/flow';
+import { getToolCallingLimit } from './tools/request';
+import {
+	collectUsedToolNames,
+	formatToolDiscoveryDiagnostics,
+	ToolDiscoverySession,
+} from './tools/virtual';
 import { createVisionService } from './vision';
 
 export class MetaChatProvider implements vscode.LanguageModelChatProvider {
@@ -152,12 +161,23 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 			return;
 		}
 
+		const modelDef = MODELS.find((model) => model.id === modelInfo.id);
+		const toolCalling = modelDef?.capabilities.toolCalling;
+		const toolDiscovery = new ToolDiscoverySession(
+			toolCalling ? options.tools : undefined,
+			getToolCallingLimit(toolCalling),
+			findLatestLoadedTools(toolFlow.messages),
+			collectUsedToolNames(toolFlow.messages),
+		);
+		logToolDiscovery(requestKind, toolDiscovery);
+
 		const usagePending = await this.beginUsageTracking({
 			messages: toolFlow.messages,
 			options,
 			modelInfo,
 			requestKind,
 		});
+		const usage = this.createUsageAccumulator(usagePending);
 
 		let prepared;
 		try {
@@ -168,6 +188,7 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 				segment,
 				messages: toolFlow.messages,
 				options,
+				tools: toolDiscovery.tools,
 				token,
 				cacheDiagnostics: this.cacheDiagnostics,
 				getVisionDescriber: () => this.vision.get(),
@@ -178,36 +199,61 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 			throw error;
 		}
 
+		let pendingNotice = joinInitialResponseNotices(
+			toolFlow.initialResponseNotice,
+			prepared.initialResponseNotice,
+		);
+		let seedReasoning = '';
 		try {
-			await streamChatCompletion({
-				prepared,
-				progress,
-				token,
-				initialResponseNotice: joinInitialResponseNotices(
-					toolFlow.initialResponseNotice,
-					prepared.initialResponseNotice,
-				),
-				getCharsPerToken: () => this.charsPerToken,
-				setCharsPerToken: (charsPerToken) => {
-					this.charsPerToken = charsPerToken;
-				},
-				usageHooks: this.createUsageHooks(usagePending),
-			});
+			for (;;) {
+				const outcome = await streamChatCompletion({
+					prepared,
+					progress,
+					token,
+					initialResponseNotice: pendingNotice,
+					getCharsPerToken: () => this.charsPerToken,
+					setCharsPerToken: (charsPerToken) => {
+						this.charsPerToken = charsPerToken;
+					},
+					usageHooks: usage.hooks,
+					seedReasoning,
+					toolCallInterceptor: toolDiscovery.virtualized
+						? (toolCall) => toolDiscovery.captureToolCall(toolCall)
+						: undefined,
+					deferReplayMarker: toolDiscovery.virtualized
+						? (emittedToolCalls) => toolDiscovery.willContinue(emittedToolCalls)
+						: undefined,
+					loadedToolNames: () => toolDiscovery.loadedToolNames(),
+				});
+				const followUp = toolDiscovery.finishRound({
+					...outcome,
+					isThinkingModel: prepared.isThinkingModel,
+				});
+				if (toolDiscovery.diagnostics().loaderCalls !== undefined) {
+					logToolDiscovery(requestKind, toolDiscovery);
+				}
+				if (!followUp || token.isCancellationRequested) {
+					break;
+				}
+				if (outcome.content || outcome.reasoning || outcome.emittedToolCalls > 0) {
+					pendingNotice = undefined;
+				}
+				seedReasoning += outcome.reasoning;
+				prepared = prepared.continueWith({ tools: toolDiscovery.tools, messages: followUp });
+			}
 		} catch (error) {
-			if (usagePending && !usagePending.settled) {
+			// Completed discovery rounds were billed; keep them instead of a non-billable attempt.
+			if (!usage.flush()) {
 				await this.recordUsageAttempt(usagePending, error);
-				usagePending.settled = true;
 			}
 			throw error;
 		}
+		usage.flush();
 		if (usagePending && !usagePending.settled && !token.isCancellationRequested) {
 			// No authoritative usage arrived (should be rare since
 			// stream_options.include_usage=true); record a non-billable
 			// attempt rather than fabricating tokens.
-			await this.recordUsageAttempt(
-				usagePending,
-				token.isCancellationRequested ? 'cancelled' : 'no-usage-returned',
-			);
+			await this.recordUsageAttempt(usagePending, 'no-usage-returned');
 		} else if (usagePending && !usagePending.settled && token.isCancellationRequested) {
 			await this.recordUsageAttempt(usagePending, 'cancelled');
 		}
@@ -248,27 +294,38 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 		}
 	}
 
-	private createUsageHooks(
+	/**
+	 * One provider call can make several Meta requests (tool discovery rounds). Usage is summed
+	 * and recorded once per call, keeping the request → task correlation unchanged.
+	 */
+	private createUsageAccumulator(
 		usagePending: { pending: PendingUsageRequest; settled: boolean } | undefined,
-	):
-		| {
-				onUsage: (usage: import('../types').MetaUsage, info: { durationMs?: number }) => void;
-		  }
-		| undefined {
-		if (!usagePending || !this.usageService) {
-			return undefined;
-		}
+	): {
+		hooks: { onUsage: (usage: MetaUsage, info: { durationMs?: number }) => void } | undefined;
+		flush: () => boolean;
+	} {
 		const service = this.usageService;
-		const state = usagePending;
+		if (!usagePending || !service) {
+			return { hooks: undefined, flush: () => false };
+		}
+		let total: MetaUsage | undefined;
+		let durationMs = 0;
 		return {
-			onUsage: (usage, info) => {
-				if (state.settled) {
-					return;
+			hooks: {
+				onUsage: (usage, info) => {
+					total = total ? sumMetaUsage(total, usage) : usage;
+					durationMs += info.durationMs ?? 0;
+				},
+			},
+			flush: () => {
+				if (!total || usagePending.settled) {
+					return false;
 				}
-				state.settled = true;
+				usagePending.settled = true;
 				void service
-					.recordCompleted(state.pending, { usage, durationMs: info.durationMs })
+					.recordCompleted(usagePending.pending, { usage: total, durationMs })
 					.catch((error) => logger.warn('[usage] Failed to record Muse usage', error));
+				return true;
 			},
 		};
 	}
@@ -289,6 +346,19 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 		} catch (recordError) {
 			logger.warn('[usage] Failed to record usage attempt', recordError);
 		}
+	}
+}
+
+function logToolDiscovery(
+	requestKind: ReturnType<typeof classifyProviderRequest>,
+	toolDiscovery: ToolDiscoverySession,
+): void {
+	const diagnostics = toolDiscovery.diagnostics();
+	// Always visible when virtualizing; passthrough counts only with debug logging.
+	if (toolDiscovery.virtualized) {
+		logger.info(formatRequestLogLine(requestKind, formatToolDiscoveryDiagnostics(diagnostics)));
+	} else if (getDebugLoggingEnabled() && diagnostics.supplied > 0) {
+		logger.debug(formatRequestLogLine(requestKind, formatToolDiscoveryDiagnostics(diagnostics)));
 	}
 }
 

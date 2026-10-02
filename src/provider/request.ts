@@ -5,7 +5,7 @@ import { getApiModelId, getBaseUrl, getMaxCompletionTokens } from '../config';
 import { MODELS } from '../consts';
 import { isOfficialMetaBaseUrl } from '../endpoint';
 import { t } from '../i18n';
-import type { MetaRequest } from '../types';
+import type { MetaMessage, MetaRequest } from '../types';
 import { convertMessages, countMessageChars } from './convert';
 import { dumpMetaRequest, type CacheDiagnosticsRecorder, type CacheDiagnosticsRun } from './debug';
 import { getConfiguredThinkingEffort, type ModelConfigurationOptions } from './models';
@@ -29,6 +29,11 @@ export interface PreparedChatRequest {
 	initialResponseNotice?: string;
 	vscodeModelId: string;
 	usageCorrelation?: { chatId: string; taskId: string };
+	/** Next request of the same provider call (tool discovery round), reusing resolved input. */
+	continueWith: (next: {
+		tools: readonly vscode.LanguageModelChatTool[] | undefined;
+		messages: readonly MetaMessage[];
+	}) => PreparedChatRequest;
 }
 
 export interface PrepareChatRequestOptions {
@@ -38,6 +43,8 @@ export interface PrepareChatRequestOptions {
 	segment: ConversationSegment;
 	messages: readonly vscode.LanguageModelChatRequestMessage[];
 	options: vscode.ProvideLanguageModelChatResponseOptions;
+	/** Tools to send, already planned within the model's tool limit. */
+	tools: readonly vscode.LanguageModelChatTool[] | undefined;
 	token: vscode.CancellationToken;
 	cacheDiagnostics: CacheDiagnosticsRecorder;
 	getVisionDescriber: () => Promise<VisionDescriber | undefined>;
@@ -51,6 +58,7 @@ export async function prepareChatRequest({
 	segment,
 	messages,
 	options,
+	tools: plannedTools,
 	token,
 	cacheDiagnostics,
 	getVisionDescriber,
@@ -70,7 +78,7 @@ export async function prepareChatRequest({
 	const visionResolution = await resolveImageMessages(messages, token, getVisionDescriber);
 	const resolvedMessages = visionResolution.messages;
 	const metaMessages = convertMessages(resolvedMessages, isThinkingModel);
-	const tools = prepareRequestTools(modelDef?.capabilities.toolCalling, options);
+	const tools = prepareRequestTools(modelDef?.capabilities.toolCalling, plannedTools);
 
 	const totalRequestChars = countMessageChars(metaMessages);
 	const baseRequest: MetaRequest = {
@@ -122,28 +130,29 @@ export async function prepareChatRequest({
 		visionStats: visionResolution.stats,
 	});
 
-	const diagnosticsRun = cacheDiagnostics.beginRequest({
-		request,
-		segment,
-		requestKind,
-		vscodeModelId: modelInfo.id,
-		isThinkingModel,
-		thinkingEffort,
-		maxTokens,
-		inputMessages: messages,
-		resolvedMessages,
-		visionModelId: visionResolution.visionModelId,
-		visionProxySource: visionResolution.visionProxySource,
-		visionStats: visionResolution.stats,
-	});
+	const beginDiagnostics = (nextRequest: MetaRequest) =>
+		cacheDiagnostics.beginRequest({
+			request: nextRequest,
+			segment,
+			requestKind,
+			vscodeModelId: modelInfo.id,
+			isThinkingModel,
+			thinkingEffort,
+			maxTokens,
+			inputMessages: messages,
+			resolvedMessages,
+			visionModelId: visionResolution.visionModelId,
+			visionProxySource: visionResolution.visionProxySource,
+			visionStats: visionResolution.stats,
+		});
 
-	return {
+	const toPrepared = (nextRequest: MetaRequest, chars: number): PreparedChatRequest => ({
 		client,
-		request,
+		request: nextRequest,
 		isThinkingModel,
-		totalRequestChars,
-		trailingToolResultIds: collectTrailingToolResultIds(metaMessages),
-		cacheDiagnostics: diagnosticsRun,
+		totalRequestChars: chars,
+		trailingToolResultIds: collectTrailingToolResultIds(nextRequest.messages),
+		cacheDiagnostics: beginDiagnostics(nextRequest),
 		requestKind,
 		segment,
 		replayMarkerMetadata: visionResolution.replayMarkerMetadata,
@@ -151,5 +160,20 @@ export async function prepareChatRequest({
 		initialResponseNotice: visionResolution.initialResponseNotice,
 		vscodeModelId: modelInfo.id,
 		usageCorrelation,
-	};
+		continueWith: (next) => {
+			const nextTools = prepareRequestTools(modelDef?.capabilities.toolCalling, next.tools);
+			const nextMessages = [...nextRequest.messages, ...next.messages];
+			return toPrepared(
+				{
+					...nextRequest,
+					messages: nextMessages,
+					tools: nextTools,
+					tool_choice: nextTools && nextTools.length > 0 ? ('auto' as const) : undefined,
+				},
+				countMessageChars(nextMessages),
+			);
+		},
+	});
+
+	return toPrepared(request, totalRequestChars);
 }

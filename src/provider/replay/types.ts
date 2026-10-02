@@ -13,6 +13,7 @@ export interface ReplayMarkerParseResult {
 	usageChatId?: string;
 	usageTaskId?: string;
 	usageIgnoredReason?: UsageMarkerTextIgnoredReason;
+	loadedTools?: string[];
 	legacySegmentOnly?: boolean;
 	payloadFormat?: ReplayMarkerPayloadFormat;
 	error?: string;
@@ -46,4 +47,6 @@ export interface ReplayMarkerMetadata {
 	visionText?: string;
 	reasoningText?: string;
 	usage?: UsageCorrelationMetadata;
+	/** Provider-virtualized tools loaded so far, most recent first. */
+	loadedTools?: readonly string[];
 }

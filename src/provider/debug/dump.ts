@@ -476,7 +476,8 @@ type SerializedContentPart =
 	  };
 
 function serializeMessage(message: any, index: number): SerializedMessage {
-	const contentParts = (getMetaContentString(message) as any).map((part: any, partIndex: number) =>
+	const parts: unknown[] = Array.isArray(message.content) ? message.content : [];
+	const contentParts = parts.map((part: any, partIndex: number) =>
 		serializeContentPart(part, partIndex),
 	);
 	return {

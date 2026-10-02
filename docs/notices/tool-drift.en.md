@@ -10,6 +10,8 @@ When the experimental `meta-spark-copilot.experimental.stabilizeToolList` settin
 
 If too many tools are available in the current environment, Copilot may trim, group, or defer tool expansion. The resulting Tools array may differ between turns.
 
+Some Copilot surfaces (for example Agent Host sessions that use the Copilot SDK) pass every available tool to the model, which can be several hundred. When more than 128 tools are available, the extension itself sends at most 128 function definitions: frequently used and recently loaded tools stay callable, and the rest are listed in a provider-owned `meta_spark_load_tools` function that the model calls to load what it needs. That set also changes as tools are loaded.
+
 ## Impact
 
 Meta uses prompt caching for the input prefix. The Tools array is part of the request input; if it changes, the cache may not hit.
