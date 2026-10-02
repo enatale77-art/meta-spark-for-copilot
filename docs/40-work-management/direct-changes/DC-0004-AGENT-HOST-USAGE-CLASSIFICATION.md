@@ -3,8 +3,8 @@
 **Type:** Lightweight Direct Change (regression repair)  
 **Branch:** `fix/agent-host-usage-classification` (from `main` @ `0842831`, 2.2.2)  
 **Date:** 2026-10-01  
-**Target version:** 2.2.3 (patch release candidate; **not** versioned, packaged, installed, or published)  
-**Status:** IMPLEMENTED — AWAITING LIVE VERIFICATION
+**Target version:** 2.2.3 (local test candidate built; not installed or published)  
+**Status:** 2.2.3 TEST CANDIDATE PACKAGED — AWAITING LIVE VERIFICATION
 
 ## Symptom
 
@@ -79,3 +79,16 @@ Not done here: needs a real Agent Host session with the installed build.
 
 - If a future SDK rewords its identity line, the repair degrades back to unassigned (never to fake chats). The classifier is the single place to update.
 - Agent Host sub-agent calls run under a different system prompt and, having no marker, remain unassigned overhead rather than being attributed to the parent task.
+
+## Test Candidate Packaging — 2026-10-01
+
+Local live-test candidate only. PR #5 is not merged; nothing is installed or published to Marketplace/Open VSX.
+
+- Version `2.2.3` in `package.json` and both root version fields of `package-lock.json`; no dependency versions changed. `CHANGELOG.md` `Unreleased` section renamed to `2.2.3`.
+- Source commit packaged: `caeea7b906d670f7dd896fc28d4a3afbcccde3d4` (`chore(release): bump to 2.2.3 test candidate`), clean working tree apart from the untracked local `.code-workspace` file. Later commits on this branch are documentation only.
+- `npm test`: 123 / 123 pass. `npm run lint` (oxlint): 0 warnings, 0 errors.
+- `npm run package`: `dist/meta-spark-for-copilot-2.2.3.vsix`, 84 files, 423,289 bytes (413.37 KB).
+- VSIX SHA-256: `D22C7FD4BD22FFE88736B68AD1A897EA8F35F0270748343B8AF4DAA0C616F2FF`
+- Verified inside the VSIX: `package.json` version 2.2.3; Agent Host identity prefix in `out/provider/routing/classifier.js`; `<skill-context>` pattern and `hasUnansweredHumanTurn` in `out/usage/context.js`; `out/provider/tools/virtual.js` present; changelog top section `2.2.3`; no `src/`, `test/`, `docs/`, `.ts`, or source-map files.
+- `dist/` is gitignored, so the VSIX is not committed.
+- Live verification checklist: see "Live verification (required before release)" above.
