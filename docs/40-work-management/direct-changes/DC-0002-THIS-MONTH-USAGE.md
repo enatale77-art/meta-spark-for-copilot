@@ -1,21 +1,31 @@
-# DC-0002 — This Month Usage Period
+# DC-0002 — Billing-aligned Usage Periods and Persistent Accounting
 
 ## Intent
-Add a **This month** period to the Muse Usage dashboard so usage can be viewed on the same calendar-month basis as Muse billing.
+Align the Muse Usage dashboard with billing and make usage accounting durable.
 
 ## Scope
-- Add a `month` dashboard period.
-- Filter month-to-date from local midnight on the first day of the current month.
-- Preserve existing rolling 7d / 30d / 90d / all options.
-- Add English and Simplified Chinese labels.
-- Add deterministic coverage for the local calendar-month boundary.
+- Add a **1D** rolling 24-hour period.
+- Add a **This month** calendar month-to-date period using local midnight on the first day of the current month.
+- Preserve existing 7d / 30d / 90d / all options.
+- Keep the append-only usage ledger and context metadata persistent through **Clear history**.
+- Redefine **Clear history** as a UI visibility cutoff: old Local Chat/task/overhead detail is hidden, but summary totals continue to use the retained ledger.
+- Store the visibility cutoff in `usage-v1/history-state.json`.
+- Keep all three files under VS Code `globalStorageUri`, so normal extension upgrades under the same extension identity retain them.
+- Include the visibility marker in the cross-window change signature so clearing history synchronizes across open VS Code windows.
+- Add deterministic coverage for month-to-date filtering and retained accounting.
 
-## Persistence finding
-Usage history is stored under VS Code extension global storage in `usage-v1/requests.jsonl` and `usage-v1/contexts.json`.
+## Persistence contract
+The extension-owned usage data lives under `<globalStorageUri>/usage-v1/`:
 
-The current **Clear history** action deletes those two files directly. There is no separate archive in the extension, so clearing history removes the extension's retained source data and will make month-to-date totals incomplete for the cleared portion of the month.
+- `requests.jsonl` — append-only accounting ledger.
+- `contexts.json` — Local Chat / task metadata.
+- `history-state.json` — visible-history cutoff only.
+
+**Clear history never deletes `requests.jsonl` or `contexts.json`.** It only advances `history-state.json`.
+
+Normal extension updates preserve `globalStorageUri` for the same extension identity, so retained accounting survives upgrades. Uninstall/reinstall or changing the extension identity is outside this guarantee.
 
 ## Non-goals
-- No change to clear-history behavior.
-- No backup/archive policy change.
-- No pricing/cost logic change.
+- No pricing/cost formula change.
+- No automatic pruning or retention limit.
+- No cloud backup.
