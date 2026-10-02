@@ -2,9 +2,21 @@ import { createHash } from 'node:crypto';
 import { appendFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import vscode from 'vscode';
-import { USAGE_DIR_NAME, CONTEXTS_FILE_NAME, REQUESTS_FILE_NAME } from './storage';
+import {
+	USAGE_DIR_NAME,
+	CONTEXTS_FILE_NAME,
+	HISTORY_STATE_FILE_NAME,
+	REQUESTS_FILE_NAME,
+} from './storage';
 import type { UsageStore } from './storage';
-import { parseContextsText, parseLedgerText, serializeContexts, serializeRecord } from './storage';
+import {
+	parseContextsText,
+	parseHistoryStateText,
+	parseLedgerText,
+	serializeContexts,
+	serializeHistoryState,
+	serializeRecord,
+} from './storage';
 import type { ContextsFile, UsageRequestRecord } from './types';
 import { emptyContexts } from './types';
 import { logger } from '../logger';
@@ -32,7 +44,10 @@ export interface FileUsageStoreOptions {
  * VS Code FileSystem-backed usage store. The JSONL ledger uses true file
  * appends (never read-modify-write), so runtime cost stays constant per
  * record and a failed read/open can never replace prior history.
- * `contexts.json` uses temp-file + rename for atomicity.
+ * `contexts.json` and `history-state.json` use atomic replacement.
+ * Clear History only advances the UI visibility cutoff; it never deletes the
+ * accounting ledger or context metadata. Global storage therefore survives
+ * normal extension upgrades under the same extension identity.
  * Only touches files under `<globalStorageUri>/usage-v1/`.
  */
 export function createFileUsageStore(
@@ -46,6 +61,7 @@ export function createFileUsageStore(
 	const dir = join(fsPath, USAGE_DIR_NAME);
 	const requestsPath = join(dir, REQUESTS_FILE_NAME);
 	const contextsPath = join(dir, CONTEXTS_FILE_NAME);
+	const historyStatePath = join(dir, HISTORY_STATE_FILE_NAME);
 	const node = options?.nodeFs ?? defaultNodeFs();
 	let queue: Promise<void> = Promise.resolve();
 
@@ -118,16 +134,31 @@ export function createFileUsageStore(
 				});
 			});
 		},
-		clear(): Promise<void> {
+		readHistoryCutoff(): Promise<number> {
 			return enqueue(async () => {
-				for (const path of [requestsPath, contextsPath]) {
-					try {
-						await node.unlink(path);
-					} catch (error) {
-						if (!node.isNotFound(error)) {
-							throw error;
-						}
+				try {
+					return parseHistoryStateText(await node.readFile(historyStatePath, 'utf8'));
+				} catch (error) {
+					if (node.isNotFound(error)) {
+						return 0;
 					}
+					throw error;
+				}
+			});
+		},
+		clearHistory(hiddenBeforeMs: number): Promise<void> {
+			return enqueue(async () => {
+				await node.mkdir(dir, { recursive: true });
+				const tempPath = join(
+					dir,
+					`${HISTORY_STATE_FILE_NAME}.${Date.now()}.${randomSuffix()}.tmp`,
+				);
+				await node.writeFile(tempPath, serializeHistoryState(hiddenBeforeMs));
+				try {
+					await node.rename(tempPath, historyStatePath);
+				} catch {
+					await node.unlink(tempPath).catch(() => undefined);
+					throw new Error('[usage] Failed to replace history-state.json atomically');
 				}
 			});
 		},
@@ -137,12 +168,15 @@ export function createFileUsageStore(
 			return enqueue(async () => {
 				const requestSig = await statSignature(node, requestsPath);
 				const contextSig = await statSignature(node, contextsPath);
-				if (!requestSig && !contextSig) {
+				const historySig = await statSignature(node, historyStatePath);
+				if (!requestSig && !contextSig && !historySig) {
 					return { requestBytes: 0, contextBytes: 0, requestCount: 0 };
 				}
 				return {
 					requestBytes: requestSig ? requestSig.size * 1009 + requestSig.mtimeMs : 0,
-					contextBytes: contextSig ? contextSig.size * 1013 + contextSig.mtimeMs : 0,
+					contextBytes:
+						(contextSig ? contextSig.size * 1013 + contextSig.mtimeMs : 0) +
+						(historySig ? historySig.size * 1019 + historySig.mtimeMs : 0),
 					requestCount: requestSig ? requestSig.size : 0,
 				};
 			});
@@ -229,6 +263,7 @@ function createVscodeFsStore(globalStorageUri: vscode.Uri): UsageStore {
 	const dir = vscode.Uri.joinPath(globalStorageUri, USAGE_DIR_NAME);
 	const requestsUri = vscode.Uri.joinPath(dir, REQUESTS_FILE_NAME);
 	const contextsUri = vscode.Uri.joinPath(dir, CONTEXTS_FILE_NAME);
+	const historyStateUri = vscode.Uri.joinPath(dir, HISTORY_STATE_FILE_NAME);
 	let queue: Promise<void> = Promise.resolve();
 
 	function enqueue<T>(work: () => Promise<T>): Promise<T> {
@@ -303,16 +338,37 @@ function createVscodeFsStore(globalStorageUri: vscode.Uri): UsageStore {
 				}
 			});
 		},
-		clear(): Promise<void> {
+		readHistoryCutoff(): Promise<number> {
 			return enqueue(async () => {
-				for (const uri of [requestsUri, contextsUri]) {
-					try {
-						await vscode.workspace.fs.delete(uri, { useTrash: false });
-					} catch (error) {
-						if ((error as vscode.FileSystemError)?.code !== 'FileNotFound') {
-							throw error;
-						}
+				try {
+					const data = await vscode.workspace.fs.readFile(historyStateUri);
+					return parseHistoryStateText(new TextDecoder().decode(data));
+				} catch (error) {
+					if ((error as vscode.FileSystemError)?.code === 'FileNotFound') {
+						return 0;
 					}
+					throw error;
+				}
+			});
+		},
+		clearHistory(hiddenBeforeMs: number): Promise<void> {
+			return enqueue(async () => {
+				await vscode.workspace.fs.createDirectory(dir);
+				const payload = new TextEncoder().encode(serializeHistoryState(hiddenBeforeMs));
+				const tempUri = vscode.Uri.joinPath(
+					dir,
+					`${HISTORY_STATE_FILE_NAME}.${Date.now()}.tmp`,
+				);
+				await vscode.workspace.fs.writeFile(tempUri, payload);
+				try {
+					await vscode.workspace.fs.rename(tempUri, historyStateUri, { overwrite: true });
+				} catch {
+					try {
+						await vscode.workspace.fs.delete(historyStateUri, { useTrash: false });
+					} catch {
+						// ignore missing target
+					}
+					await vscode.workspace.fs.rename(tempUri, historyStateUri, { overwrite: true });
 				}
 			});
 		},
@@ -322,12 +378,15 @@ function createVscodeFsStore(globalStorageUri: vscode.Uri): UsageStore {
 			return enqueue(async () => {
 				const requestSig = await statVscodeSignature(requestsUri);
 				const contextSig = await statVscodeSignature(contextsUri);
-				if (!requestSig && !contextSig) {
+				const historySig = await statVscodeSignature(historyStateUri);
+				if (!requestSig && !contextSig && !historySig) {
 					return { requestBytes: 0, contextBytes: 0, requestCount: 0 };
 				}
 				return {
 					requestBytes: requestSig ? requestSig.size * 1009 + requestSig.mtime : 0,
-					contextBytes: contextSig ? contextSig.size * 1013 + contextSig.mtime : 0,
+					contextBytes:
+						(contextSig ? contextSig.size * 1013 + contextSig.mtime : 0) +
+						(historySig ? historySig.size * 1019 + historySig.mtime : 0),
 					requestCount: requestSig ? requestSig.size : 0,
 				};
 			});
