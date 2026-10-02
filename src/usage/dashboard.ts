@@ -467,7 +467,7 @@ export class UsageDashboard {
 		const totals = aggregateRequests(records);
 		const visibleRecords =
 			historyCutoffMs > 0
-				? records.filter((record) => record.timestampMs >= historyCutoffMs)
+				? records.filter((record) => record.timestampMs > historyCutoffMs)
 				: records;
 		const tasks = rollupTasks(
 			visibleRecords,
