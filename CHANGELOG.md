@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- **Large tool environments no longer fail with "Meta supports at most 128 functions per tools request"** — VS Code Agent Host sessions (Copilot SDK) pass the full tool inventory to BYOK models (300+ tools observed with MCP servers and extension tools) and ignore the model's declared 128-tool limit. When more than 128 tools are available, the provider now sends at most 128 function definitions per Meta request: frequently used, previously called, and loaded tools stay callable; the rest are listed in a provider-owned `meta_spark_load_tools` function that the model calls to load tools by name, group, or keyword. Loader calls are resolved inside the provider (never sent to Copilot), and loaded tools persist across turns via the existing replay marker. Disabling MCP servers is not required
+- Requests with 128 or fewer tools are sent unchanged; Copilot's classic `activate_*` virtual tools and `stabilizeToolList` behave as before
+- Usage for a request that included tool-loading rounds is summed and recorded once
+- New `[tool-virtualization]` log line (supplied / activator / sent / deferred / loaded counts, discovery rounds; no tool arguments)
+- Fixed request dumps for provider input (`providerInputDump write failed: getMetaContentString(...).map is not a function`)
+
 ## 2.2.1
 
 ### Changes
