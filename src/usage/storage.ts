@@ -1,8 +1,9 @@
 /**
  * File-backed usage storage under `<globalStorageUri>/usage-v1/`.
  *
- * - `requests.jsonl` — append-only ledger, schema-versioned per line.
+ * - `requests.jsonl` — append-only accounting ledger, schema-versioned per line.
  * - `contexts.json`  — versioned chat/task metadata, written atomically.
+ * - `history-state.json` — UI visibility cutoff; never deletes accounting data.
  *
  * Pure helpers (parse/serialize/filter) live here for deterministic tests.
  * VS Code `FileSystem`-backed IO is isolated in `createFileUsageStore`;
@@ -14,7 +15,9 @@ import { emptyContexts } from './types';
 export const USAGE_DIR_NAME = 'usage-v1';
 export const REQUESTS_FILE_NAME = 'requests.jsonl';
 export const CONTEXTS_FILE_NAME = 'contexts.json';
+export const HISTORY_STATE_FILE_NAME = 'history-state.json';
 export const REQUEST_RECORD_VERSION = 1;
+export const HISTORY_STATE_VERSION = 1;
 
 export interface ParsedLedger {
 	records: UsageRequestRecord[];
@@ -101,6 +104,29 @@ export function serializeContexts(contexts: ContextsFile): string {
 	return JSON.stringify({ version: 1, chats: contexts.chats, tasks: contexts.tasks });
 }
 
+export interface HistoryStateFile {
+	version: 1;
+	hiddenBeforeMs: number;
+}
+
+export function parseHistoryStateText(text: string): number {
+	try {
+		const parsed = JSON.parse(text) as Partial<HistoryStateFile>;
+		return typeof parsed.hiddenBeforeMs === 'number' && Number.isFinite(parsed.hiddenBeforeMs)
+			? Math.max(0, parsed.hiddenBeforeMs)
+			: 0;
+	} catch {
+		return 0;
+	}
+}
+
+export function serializeHistoryState(hiddenBeforeMs: number): string {
+	return JSON.stringify({
+		version: HISTORY_STATE_VERSION,
+		hiddenBeforeMs: Math.max(0, hiddenBeforeMs),
+	});
+}
+
 export interface UsageChangeSignature {
 	requestBytes: number;
 	contextBytes: number;
@@ -110,13 +136,17 @@ export interface UsageChangeSignature {
 export function signatureFromLedger(
 	records: readonly UsageRequestRecord[],
 	contexts: ContextsFile,
+	hiddenBeforeMs = 0,
 ): UsageChangeSignature {
 	return {
 		requestBytes: records.reduce(
 			(sum, record) => sum + (record.totalTokens ?? 0) + record.timestampMs,
 			records.length,
 		),
-		contextBytes: Object.keys(contexts.chats).length * 100003 + Object.keys(contexts.tasks).length,
+		contextBytes:
+			Object.keys(contexts.chats).length * 100003 +
+			Object.keys(contexts.tasks).length +
+			Math.max(0, hiddenBeforeMs),
 		requestCount: records.length,
 	};
 }
@@ -126,7 +156,8 @@ export interface UsageStore {
 	readRequests(): Promise<ParsedLedger>;
 	readContexts(): Promise<ContextsFile>;
 	writeContexts(contexts: ContextsFile): Promise<void>;
-	clear(): Promise<void>;
+	readHistoryCutoff(): Promise<number>;
+	clearHistory(hiddenBeforeMs: number): Promise<void>;
 	getChangeSignature?(): Promise<UsageChangeSignature | undefined>;
 }
 
@@ -137,6 +168,7 @@ export function createMemoryUsageStore(): UsageStore & {
 } {
 	let records: UsageRequestRecord[] = [];
 	let contexts: ContextsFile = emptyContexts();
+	let historyCutoffMs = 0;
 	let revision = 0;
 	return {
 		async appendRequest(record: UsageRequestRecord): Promise<void> {
@@ -153,13 +185,15 @@ export function createMemoryUsageStore(): UsageStore & {
 			contexts = structuredClone(next);
 			revision += 1;
 		},
-		async clear(): Promise<void> {
-			records = [];
-			contexts = emptyContexts();
+		async readHistoryCutoff(): Promise<number> {
+			return historyCutoffMs;
+		},
+		async clearHistory(hiddenBeforeMs: number): Promise<void> {
+			historyCutoffMs = Math.max(0, hiddenBeforeMs);
 			revision += 1;
 		},
 		async getChangeSignature(): Promise<UsageChangeSignature | undefined> {
-			return signatureFromLedger(records, contexts);
+			return signatureFromLedger(records, contexts, historyCutoffMs);
 		},
 		getRecords(): UsageRequestRecord[] {
 			return [...records];
@@ -170,7 +204,10 @@ export function createMemoryUsageStore(): UsageStore & {
 	};
 }
 
-/** Scope guard: clearing usage history must only target usage-v1 files. */
+/**
+ * Scope guard: Clear History may only update the visibility marker. The
+ * accounting ledger and context metadata are intentionally persistent.
+ */
 export function usageClearTargets(): readonly string[] {
-	return [`${USAGE_DIR_NAME}/${REQUESTS_FILE_NAME}`, `${USAGE_DIR_NAME}/${CONTEXTS_FILE_NAME}`];
+	return [`${USAGE_DIR_NAME}/${HISTORY_STATE_FILE_NAME}`];
 }
