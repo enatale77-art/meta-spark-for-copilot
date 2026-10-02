@@ -234,6 +234,56 @@ export function filterByTime(
 	return records.filter((record) => record.timestampMs >= cutoff);
 }
 
+/** Calendar month-to-date in the user's local timezone. */
+export function filterThisMonth(
+	records: readonly UsageRequestRecord[],
+	nowMs: number,
+): UsageRequestRecord[] {
+	const now = new Date(nowMs);
+	const startOfMonthMs = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+	return records.filter((record) => record.timestampMs >= startOfMonthMs);
+}
+
+/** Dashboard periods in display order. `1d` is a rolling 24 hours. */
+export const USAGE_PERIODS = ['1d', '7d', '30d', '90d', 'month', 'all'] as const;
+export type UsagePeriod = (typeof USAGE_PERIODS)[number];
+
+export function isUsagePeriod(value: unknown): value is UsagePeriod {
+	return typeof value === 'string' && (USAGE_PERIODS as readonly string[]).includes(value);
+}
+
+/** Rolling-day windows, local calendar month-to-date, or everything. */
+export function filterByPeriod(
+	records: readonly UsageRequestRecord[],
+	period: UsagePeriod,
+	nowMs: number,
+): UsageRequestRecord[] {
+	switch (period) {
+		case 'month':
+			return filterThisMonth(records, nowMs);
+		case 'all':
+			return [...records];
+		default:
+			return filterByTime(records, nowMs, Number.parseInt(period, 10));
+	}
+}
+
+/**
+ * Records still visible after Clear History. The cutoff is inclusive:
+ * anything recorded at or before it is hidden from chat/task/overhead
+ * detail, while accounting totals keep using the full retained ledger.
+ * A cutoff of 0 hides nothing.
+ */
+export function filterVisibleHistory(
+	records: readonly UsageRequestRecord[],
+	historyCutoffMs: number,
+): UsageRequestRecord[] {
+	if (!(historyCutoffMs > 0)) {
+		return [...records];
+	}
+	return records.filter((record) => record.timestampMs > historyCutoffMs);
+}
+
 /** Unassigned Copilot overhead: records with no task ID, grouped by kind. */
 export function rollupUnassignedOverhead(records: readonly UsageRequestRecord[]): OverheadRollup {
 	const scratch = emptyTotals();

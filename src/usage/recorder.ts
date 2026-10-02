@@ -63,16 +63,6 @@ export class UsageService {
 		this.getWorkspaceName = options.getWorkspaceName ?? defaultWorkspaceName;
 	}
 
-	/**
-	 * Delete all usage-monitor storage and drop the in-memory contexts cache
-	 * so a later request cannot write stale chat/task metadata back to disk.
-	 * Every clear path (dashboard + Command Palette) must go through here.
-	 */
-	async clearAll(): Promise<void> {
-		await this.store.clear();
-		this.invalidateContextsCache();
-	}
-
 	resolveProject(): { projectId: string; projectName: string } {
 		const uris = this.getWorkspaceUris();
 		const derived = deriveProjectId(uris);
@@ -329,11 +319,6 @@ export class UsageService {
 		}
 		this.contextsLoaded = true;
 		return this.contextsCache ?? emptyContexts();
-	}
-
-	invalidateContextsCache(): void {
-		this.contextsLoaded = false;
-		this.contextsCache = null;
 	}
 }
 
