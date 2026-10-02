@@ -98,14 +98,13 @@ async function clearUsageHistory(
 		if (confirmed !== t('usage.clear.confirmYes')) {
 			return;
 		}
-		// Route through the service so the in-memory contexts cache is
-		// dropped with storage; otherwise a later request could resurrect
-		// cleared chat/task metadata.
+		// Route through the service so every clear path advances the same
+		// persistent visibility cutoff without deleting accounting data.
 		const service = getUsageService?.();
 		if (service) {
 			await service.clearAll();
 		} else {
-			await deps.store.clear();
+			await deps.store.clearHistory(Date.now());
 		}
 		await deps.dashboard?.refresh();
 		await deps.statusBar?.refresh();
