@@ -13,7 +13,7 @@ import { logger } from '../logger';
 import type { UsageRequestRecord } from './types';
 import type { UsageStore } from './storage';
 
-export type UsagePeriod = 'month' | '7d' | '30d' | '90d' | 'all';
+export type UsagePeriod = '1d' | '7d' | '30d' | '90d' | 'month' | 'all';
 
 export interface UsageDashboardState {
 	period: UsagePeriod;
@@ -297,6 +297,7 @@ export class UsageDashboard {
 		try {
 			const ledger = await this.store.readRequests();
 			const contexts = await this.store.readContexts();
+			const historyCutoffMs = await this.store.readHistoryCutoff();
 			this.viewState = {
 				period: '30d',
 				projectId: 'all',
@@ -308,7 +309,12 @@ export class UsageDashboard {
 			};
 			this.lastSignature = await this.readSignature().catch(() => undefined);
 			this.lastRefreshMs = Date.now();
-			this.panel.webview.html = this.renderDashboard(ledger.records, contexts, this.viewState).html;
+			this.panel.webview.html = this.renderDashboard(
+				ledger.records,
+				contexts,
+				this.viewState,
+				historyCutoffMs,
+			).html;
 			if (ledger.corruptedLines > 0) {
 				logger.warn(
 					`[usage] Ignored ${ledger.corruptedLines} corrupted ledger line(s); history remains readable.`,
@@ -348,11 +354,17 @@ export class UsageDashboard {
 				};
 				const ledger = await this.store.readRequests();
 				const contexts = await this.store.readContexts();
+				const historyCutoffMs = await this.store.readHistoryCutoff();
 				// DC-0001 chat-first: opening another chat clears the previous
 				// task client-side; the sanitizer inside renderDashboard
 				// additionally drops stale cross-chat selections after filter
 				// changes or live updates.
-				const rendered = this.renderDashboard(ledger.records, contexts, this.viewState);
+				const rendered = this.renderDashboard(
+					ledger.records,
+					contexts,
+					this.viewState,
+					historyCutoffMs,
+				);
 				this.viewState.selectedChatId = rendered.selectedChatId;
 				this.viewState.selectedTaskId = rendered.selectedTaskId;
 				this.panel.webview.html = rendered.html;
@@ -404,7 +416,7 @@ export class UsageDashboard {
 		if (this.onCleared) {
 			await this.onCleared();
 		} else {
-			await this.store.clear();
+			await this.store.clearHistory(Date.now());
 		}
 		await this.refresh();
 		void vscode.window.showInformationMessage(t('usage.clear.done'));
@@ -429,6 +441,7 @@ export class UsageDashboard {
 			tasks: Record<string, { preview: string }>;
 		},
 		state: UsageDashboardState,
+		historyCutoffMs = 0,
 	): { html: string; selectedChatId: string | null; selectedTaskId: string | null } {
 		const nowMs = Date.now();
 		const periodDays =
@@ -452,8 +465,12 @@ export class UsageDashboard {
 			);
 		}
 		const totals = aggregateRequests(records);
+		const visibleRecords =
+			historyCutoffMs > 0
+				? records.filter((record) => record.timestampMs >= historyCutoffMs)
+				: records;
 		const tasks = rollupTasks(
-			records,
+			visibleRecords,
 			new Map(Object.entries(contexts.tasks).map(([id, task]) => [id, task.preview])),
 		);
 		const chats = rollupChats(
@@ -486,11 +503,11 @@ export class UsageDashboard {
 				? selectedChatTasks.find((task) => task.taskId === selection.selectedTaskId)
 				: undefined;
 		const selectedRequests = selectedTask
-			? records
+			? visibleRecords
 					.filter((record) => record.taskId === selectedTask.taskId)
 					.sort((a, b) => a.timestampMs - b.timestampMs)
 				: [];
-		const overhead = rollupUnassignedOverhead(records);
+		const overhead = rollupUnassignedOverhead(visibleRecords);
 		const effectiveChatId = selectedChat ? selectedChat.chatId : null;
 		const effectiveTaskId = selectedTask ? selectedTask.taskId : null;
 
@@ -532,7 +549,7 @@ export class UsageDashboard {
 			`<h2>${escapeHtml(t('usage.dashboard.title'))}</h2>`,
 			`<div class="toolbar">`,
 			`<label>${escapeHtml(t('usage.dashboard.period'))} <select id="period">`,
-			renderOptions(['month', '7d', '30d', '90d', 'all'], state.period),
+			renderOptions(['1d', '7d', '30d', '90d', 'month', 'all'], state.period),
 			`</select></label>`,
 			`<label>${escapeHtml(t('usage.dashboard.project'))} <select id="projectId">`,
 			`<option value="all">${escapeHtml(t('usage.dashboard.all'))}</option>`,
@@ -569,6 +586,9 @@ export class UsageDashboard {
 			summaryCard(t('usage.dashboard.output'), formatCompact(totals.outputTokens)),
 			summaryCard(t('usage.dashboard.cost'), formatCost(totals.estimatedCostUsd)),
 			`</div>`,
+			historyCutoffMs > 0
+				? `<p class="note">${escapeHtml(t('usage.dashboard.historyRetained', formatDateTime(historyCutoffMs)))}</p>`
+				: '',
 			// DC-0001 chat-first: the default dashboard shows one Local Chat
 			// card per chat (no separate top-level Tasks section). Task cards
 			// and request diagnostics render only inside the expanded chat.
@@ -726,11 +746,17 @@ export class UsageDashboard {
 		try {
 			const ledger = await this.store.readRequests();
 			const contexts = await this.store.readContexts();
+			const historyCutoffMs = await this.store.readHistoryCutoff();
 			this.lastSignature = await this.readSignature().catch(() => undefined);
 			this.lastRefreshMs = Date.now();
 			// DC-0001: live refreshes reuse the sanitized render result so a
 			// vanished chat/task collapses cleanly instead of showing stale detail.
-			const rendered = this.renderDashboard(ledger.records, contexts, this.viewState);
+			const rendered = this.renderDashboard(
+				ledger.records,
+				contexts,
+				this.viewState,
+				historyCutoffMs,
+			);
 			this.viewState.selectedChatId = rendered.selectedChatId;
 			this.viewState.selectedTaskId = rendered.selectedTaskId;
 			this.panel.webview.html = rendered.html;
@@ -818,6 +844,7 @@ export class UsageDashboard {
 		}
 		const ledger = await this.store.readRequests();
 		const contexts = await this.store.readContexts();
+		const historyCutoffMs = await this.store.readHistoryCutoff();
 		const requestBytes = ledger.records.reduce(
 			(sum, record) => sum + (record.totalTokens ?? 0) + record.timestampMs,
 			ledger.records.length,
@@ -825,7 +852,9 @@ export class UsageDashboard {
 		return {
 			requestBytes,
 			contextBytes:
-				Object.keys(contexts.chats).length * 100003 + Object.keys(contexts.tasks).length,
+				Object.keys(contexts.chats).length * 100003 +
+				Object.keys(contexts.tasks).length +
+				historyCutoffMs,
 			requestCount: ledger.records.length,
 		};
 	}
@@ -840,13 +869,18 @@ export class UsageDashboard {
 }
 
 function toPeriod(value: unknown): UsagePeriod {
-	return value === 'month' || value === '7d' || value === '30d' || value === '90d' || value === 'all' ? value : '30d';
+	return value === '1d' || value === '7d' || value === '30d' || value === '90d' || value === 'month' || value === 'all' ? value : '30d';
 }
 
 function renderOptions(options: string[], selected: string): string {
 	return options
 		.map((option) => {
-			const label = option === 'month' ? t('usage.dashboard.thisMonth') : option;
+			const label =
+				option === 'month'
+					? t('usage.dashboard.thisMonth')
+					: option === '1d'
+						? '1D'
+						: option;
 			return `<option value="${option}"${option === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`;
 		})
 		.join('');
