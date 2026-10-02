@@ -2,6 +2,13 @@
 
 ## 2.2.2
 
+### Changes
+
+- **Billing-aligned usage periods** — the Usage Dashboard period filter now offers 1D (rolling 24 hours), 7d, 30d, 90d, This month (local calendar month-to-date from local midnight on the 1st), and All
+- **Clear history is non-destructive** — it now only advances a visible-history cutoff stored in `usage-v1/history-state.json`. `requests.jsonl` and `contexts.json` are never deleted, and summary totals keep using the full retained ledger; older Local Chat/task/overhead detail and the status-bar task are hidden. The cutoff persists across restarts and updates
+- **Restore history** — new dashboard button and `Meta Spark: Restore Usage History` command reset the cutoff so all retained history (hidden Local Chat/task detail) is visible again. Non-destructive and idempotent; the status bar honors Clear/Restore, and open dashboards in other windows refresh through cross-window sync
+- **Dashboard polish** — buttons, selects, and inputs now use the VS Code UI font (previously the platform default); actions sit in the header, filters in a captioned bar, secondary buttons stay visible in themes with transparent button backgrounds, chat/task details use label/value grids, and numeric table columns are right-aligned
+
 ### Fixes
 
 - **Large tool environments no longer fail with "Meta supports at most 128 functions per tools request"** — VS Code Agent Host sessions (Copilot SDK) pass the full tool inventory to BYOK models (300+ tools observed with MCP servers and extension tools) and ignore the model's declared 128-tool limit. When more than 128 tools are available, the provider now sends at most 128 function definitions per Meta request: frequently used, previously called, and loaded tools stay callable; the rest are listed in a provider-owned `meta_spark_load_tools` function that the model calls to load tools by name, group, or keyword. Loader calls are resolved inside the provider (never sent to Copilot), and loaded tools persist across turns via the existing replay marker. Disabling MCP servers is not required

@@ -8,7 +8,12 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const {
 	aggregateRequests,
+	filterByPeriod,
 	filterByTime,
+	filterThisMonth,
+	filterVisibleHistory,
+	isUsagePeriod,
+	USAGE_PERIODS,
 	rollupChats,
 	rollupTasks,
 	rollupUnassignedOverhead,
@@ -23,7 +28,7 @@ const {
 	serializeMarkerPayload,
 	sanitizePromptText,
 } = require('../out/usage/context.js');
-const { usageSignatureChanged, shouldRefreshSignature, nextRefreshDecision, sanitizeDashboardSelection, encodeWebviewSelection, applyHydratedSelection } = (() => {
+const { usageSignatureChanged, shouldRefreshSignature, nextRefreshDecision, sanitizeDashboardSelection, encodeWebviewSelection, applyHydratedSelection, partitionDashboardRecords } = (() => {
 	const Module = require('node:module');
 	const { join } = require('node:path');
 	const stubPath = join(__dirname, 'vscode-stub.cjs');
@@ -44,9 +49,14 @@ const { signatureFromLedger } = require('../out/usage/storage.js');
 const { escapeCsvField, toCsvText } = require('../out/usage/csv.js');
 const { calculateCost, resolvePricing, splitUsageTokens } = require('../out/usage/pricing.js');
 const {
+	clearVisibleHistory,
+	createMemoryUsageStore,
 	parseContextsText,
+	parseHistoryStateText,
+	restoreVisibleHistory,
 	parseLedgerText,
 	serializeContexts,
+	serializeHistoryState,
 	serializeRecord,
 	usageClearTargets,
 } = require('../out/usage/storage.js');
@@ -100,6 +110,24 @@ function toolOnly() {
 		hasToolResultOnly: true,
 		partCount: 1,
 	};
+}
+
+function requireWithVscodeStub(modulePath) {
+	const Module = require('node:module');
+	const { join } = require('node:path');
+	const stubPath = join(__dirname, 'vscode-stub.cjs');
+	const originalResolve = Module._resolveFilename;
+	Module._resolveFilename = function (request, ...rest) {
+		if (request === 'vscode') {
+			return stubPath;
+		}
+		return originalResolve.call(this, request, ...rest);
+	};
+	try {
+		return require(modulePath);
+	} finally {
+		Module._resolveFilename = originalResolve;
+	}
 }
 
 function makeRecord(overrides = {}) {
@@ -511,8 +539,11 @@ describe('persistence', () => {
 		assert.equal(parseContextsText('{{{').corrupted, true);
 	});
 
-	it('clear-history scope targets only usage-v1 files', () => {
-		assert.deepEqual(usageClearTargets(), ['usage-v1/requests.jsonl', 'usage-v1/contexts.json']);
+	it('clear-history only updates the visibility marker and never targets accounting files', () => {
+		assert.deepEqual(usageClearTargets(), ['usage-v1/history-state.json']);
+		const serialized = serializeHistoryState(1234);
+		assert.equal(parseHistoryStateText(serialized), 1234);
+		assert.equal(parseHistoryStateText('{{{'), 0);
 	});
 
 	it('true-append ledger keeps prior records across sequential appends', async () => {
@@ -583,28 +614,18 @@ describe('persistence', () => {
 		}
 	});
 
-	it('clearAll drops the contexts cache so later requests cannot resurrect cleared metadata', async () => {
-		const Module = require('node:module');
-		const { join } = require('node:path');
-		const stubPath = join(__dirname, 'vscode-stub.cjs');
-		const originalResolve = Module._resolveFilename;
-		Module._resolveFilename = function (request, ...rest) {
-			if (request === 'vscode') {
-				return stubPath;
-			}
-			return originalResolve.call(this, request, ...rest);
-		};
+	it('Clear History preserves ledger records and contexts and only sets the cutoff', async () => {
 		const originalWarn = console.warn;
 		console.warn = () => undefined;
 		try {
-			const { createMemoryUsageStore } = require('../out/usage/storage.js');
-			const { UsageService } = require('../out/usage/recorder.js');
+			const { UsageService } = requireWithVscodeStub('../out/usage/recorder.js');
 			const store = createMemoryUsageStore();
 			const service = new UsageService({
 				store,
 				getWorkspaceUris: () => ['file:///demo'],
 				getWorkspaceName: () => 'Demo',
 			});
+			await store.appendRequest(makeRecord({ id: 'retained-before-clear' }));
 			const pending = await service.beginRequest({
 				messages: [],
 				requestKind: 'main-agent',
@@ -613,27 +634,164 @@ describe('persistence', () => {
 			});
 			assert.ok(pending.allocation.chatId);
 			assert.ok(pending.allocation.taskId);
-			const before = await store.readContexts();
-			assert.equal(Object.keys(before.chats).length, 1);
+			const beforeContexts = await store.readContexts();
+			assert.equal(Object.keys(beforeContexts.chats).length, 1);
 
-			await service.clearAll();
-			const cleared = await store.readContexts();
-			assert.deepEqual(cleared, emptyContexts());
+			assert.equal(await clearVisibleHistory(store, 1234567890), 1234567890);
 
-			// The service cache was invalidated with storage; the next request
-			// must not write the stale pre-clear chat/task back to disk.
-			await service.beginRequest({
-				messages: [],
-				requestKind: 'chat-title',
-				vscodeModelId: 'muse-spark-1.3',
-				apiModelId: 'muse-spark-1.3',
-			});
-			const after = await store.readContexts();
-			assert.deepEqual(after, emptyContexts());
+			const ledgerAfter = await store.readRequests();
+			assert.equal(ledgerAfter.records.length, 1);
+			assert.equal(ledgerAfter.records[0].id, 'retained-before-clear');
+			assert.deepEqual(await store.readContexts(), beforeContexts);
+			assert.equal(await store.readHistoryCutoff(), 1234567890);
 		} finally {
-			Module._resolveFilename = originalResolve;
 			console.warn = originalWarn;
 		}
+	});
+
+	it('Clear History never moves the cutoff backwards', async () => {
+		const store = createMemoryUsageStore();
+		await clearVisibleHistory(store, 5000);
+		assert.equal(await clearVisibleHistory(store, 4000), 5000);
+		assert.equal(await store.readHistoryCutoff(), 5000);
+		assert.equal(await clearVisibleHistory(store, 6000), 6000);
+	});
+
+	it('Restore History resets the cutoff without touching ledger or contexts', async () => {
+		const store = createMemoryUsageStore();
+		await store.appendRequest(makeRecord({ id: 'kept' }));
+		const contexts = emptyContexts();
+		contexts.tasks['task-1'] = { taskId: 'task-1', chatId: 'chat-1', preview: 'Fix login bug' };
+		await store.writeContexts(contexts);
+		await clearVisibleHistory(store, 1000);
+		const signatureCleared = await store.getChangeSignature();
+
+		assert.equal(await restoreVisibleHistory(store), true);
+		assert.equal(await store.readHistoryCutoff(), 0);
+		assert.deepEqual(
+			store.getRecords().map((record) => record.id),
+			['kept'],
+		);
+		assert.deepEqual(store.getContexts(), contexts);
+		assert.ok(usageSignatureChanged(signatureCleared, await store.getChangeSignature()));
+	});
+
+	it('Restore History is idempotent when history was never cleared', async () => {
+		const store = createMemoryUsageStore();
+		await store.appendRequest(makeRecord({ id: 'kept' }));
+		const before = await store.getChangeSignature();
+		assert.equal(await restoreVisibleHistory(store), false);
+		assert.equal(await store.readHistoryCutoff(), 0);
+		assert.deepEqual(await store.getChangeSignature(), before);
+		await clearVisibleHistory(store, 1000);
+		assert.equal(await restoreVisibleHistory(store), true);
+		const afterFirst = await store.getChangeSignature();
+		assert.equal(await restoreVisibleHistory(store), false);
+		assert.deepEqual(await store.getChangeSignature(), afterFirst);
+	});
+
+	it('file store: Clear/Restore keep requests.jsonl and contexts.json byte-identical and persist across restarts', async () => {
+		const { mkdtempSync, readFileSync, readdirSync, existsSync } = require('node:fs');
+		const { tmpdir } = require('node:os');
+		const { join } = require('node:path');
+		const { createFileUsageStore } = requireWithVscodeStub('../out/usage/fileStore.js');
+		const root = mkdtempSync(join(tmpdir(), 'usage-history-'));
+		const fakeUri = { fsPath: root, scheme: 'file' };
+		const usageDir = join(root, 'usage-v1');
+		const requestsPath = join(usageDir, 'requests.jsonl');
+		const contextsPath = join(usageDir, 'contexts.json');
+		const historyPath = join(usageDir, 'history-state.json');
+
+		const windowA = createFileUsageStore(fakeUri);
+		await windowA.appendRequest(makeRecord({ id: 'old-1', timestampMs: 1000 }));
+		await windowA.appendRequest(makeRecord({ id: 'old-2', timestampMs: 2000 }));
+		const contexts = emptyContexts();
+		contexts.tasks['task-1'] = { taskId: 'task-1', chatId: 'chat-1', preview: 'Fix login bug' };
+		await windowA.writeContexts(contexts);
+		const ledgerBytes = readFileSync(requestsPath);
+		const contextBytes = readFileSync(contextsPath);
+
+		// Never cleared: Restore is a no-op and creates nothing.
+		assert.equal(await restoreVisibleHistory(windowA), false);
+		assert.equal(existsSync(historyPath), false);
+
+		// A second window shares the same global storage.
+		const windowB = createFileUsageStore(fakeUri);
+		const signatureBefore = await windowB.getChangeSignature();
+
+		await clearVisibleHistory(windowA, 2000);
+		assert.deepEqual(readFileSync(requestsPath), ledgerBytes);
+		assert.deepEqual(readFileSync(contextsPath), contextBytes);
+		assert.equal(parseHistoryStateText(readFileSync(historyPath, 'utf8')), 2000);
+		const signatureCleared = await windowB.getChangeSignature();
+		assert.ok(usageSignatureChanged(signatureBefore, signatureCleared));
+		assert.equal(await windowB.readHistoryCutoff(), 2000);
+
+		// Restart / extension update: a fresh store over the same storage keeps
+		// the full ledger and the persisted cutoff.
+		const restarted = createFileUsageStore(fakeUri);
+		assert.deepEqual(
+			(await restarted.readRequests()).records.map((record) => record.id),
+			['old-1', 'old-2'],
+		);
+		assert.deepEqual(await restarted.readContexts(), contexts);
+		assert.equal(await restarted.readHistoryCutoff(), 2000);
+
+		assert.equal(await restoreVisibleHistory(restarted), true);
+		assert.deepEqual(readFileSync(requestsPath), ledgerBytes);
+		assert.deepEqual(readFileSync(contextsPath), contextBytes);
+		assert.equal(await createFileUsageStore(fakeUri).readHistoryCutoff(), 0);
+		assert.equal(await windowB.readHistoryCutoff(), 0);
+		const signatureRestored = await windowB.getChangeSignature();
+		assert.ok(usageSignatureChanged(signatureCleared, signatureRestored));
+
+		// Idempotent restore leaves the marker untouched.
+		assert.equal(await restoreVisibleHistory(windowB), false);
+		assert.deepEqual(await windowB.getChangeSignature(), signatureRestored);
+
+		// Atomic replacement leaves no temp files behind.
+		assert.deepEqual(readdirSync(usageDir).sort(), [
+			'contexts.json',
+			'history-state.json',
+			'requests.jsonl',
+		]);
+	});
+
+	it('file store: a failed cutoff replace keeps the previous history state', async () => {
+		const files = new Map();
+		const memoryFs = {
+			mkdir: async () => undefined,
+			appendFile: async () => undefined,
+			readFile: async (path) => {
+				if (!files.has(path)) {
+					const error = new Error('ENOENT');
+					error.code = 'ENOENT';
+					throw error;
+				}
+				return files.get(path);
+			},
+			writeFile: async (path, data) => {
+				files.set(path, String(data));
+			},
+			unlink: async (path) => {
+				files.delete(path);
+			},
+			rename: async (from, to) => {
+				files.set(to, files.get(from));
+				files.delete(from);
+			},
+			readdir: async () => [...files.keys()].map((path) => path.split(/[\\/]/).pop()),
+			isNotFound: (error) => error?.code === 'ENOENT',
+		};
+		const { createFileUsageStore } = requireWithVscodeStub('../out/usage/fileStore.js');
+		const store = createFileUsageStore({ fsPath: '/virtual-usage', scheme: 'file' }, { nodeFs: memoryFs });
+		await clearVisibleHistory(store, 3000);
+		memoryFs.rename = async () => {
+			throw new Error('EBUSY');
+		};
+		await assert.rejects(() => restoreVisibleHistory(store), /history-state\.json/);
+		assert.equal(await store.readHistoryCutoff(), 3000);
+		assert.ok(![...files.keys()].some((path) => path.endsWith('.tmp')));
 	});
 });
 
@@ -700,6 +858,63 @@ describe('aggregation', () => {
 		assert.equal(filterByTime(records, now, 7).length, 2);
 		assert.equal(filterByTime(records, now, 1).length, 1);
 		assert.equal(filterByTime(records, now, null).length, 2);
+	});
+
+	it('period dropdown offers 1D, 7d, 30d, 90d, This month, and all', () => {
+		assert.deepEqual([...USAGE_PERIODS], ['1d', '7d', '30d', '90d', 'month', 'all']);
+		for (const period of USAGE_PERIODS) {
+			assert.equal(isUsagePeriod(period), true);
+		}
+		assert.equal(isUsagePeriod('1D'), false);
+		assert.equal(isUsagePeriod('365d'), false);
+		assert.equal(isUsagePeriod(undefined), false);
+	});
+
+	it('1D is a rolling 24 hours, not the calendar day', () => {
+		const now = new Date(2026, 9, 15, 1, 0, 0, 0).getTime();
+		const day = 24 * 60 * 60 * 1000;
+		const records = [
+			makeRecord({ id: 'just-outside', timestampMs: now - day - 1 }),
+			makeRecord({ id: 'boundary', timestampMs: now - day }),
+			makeRecord({ id: 'yesterday-evening', timestampMs: now - 3 * 60 * 60 * 1000 }),
+			makeRecord({ id: 'now', timestampMs: now }),
+		];
+		assert.deepEqual(
+			filterByPeriod(records, '1d', now).map((record) => record.id),
+			['boundary', 'yesterday-evening', 'now'],
+		);
+	});
+
+	it('period filter routes 7d/30d/90d/month/all to the right windows', () => {
+		const now = new Date(2026, 9, 15, 12, 0, 0, 0).getTime();
+		const day = 24 * 60 * 60 * 1000;
+		const records = [
+			makeRecord({ id: 'd100', timestampMs: now - 100 * day }),
+			makeRecord({ id: 'd60', timestampMs: now - 60 * day }),
+			makeRecord({ id: 'd20', timestampMs: now - 20 * day }),
+			makeRecord({ id: 'd10', timestampMs: now - 10 * day }),
+			makeRecord({ id: 'd3', timestampMs: now - 3 * day }),
+		];
+		const ids = (period) => filterByPeriod(records, period, now).map((record) => record.id);
+		assert.deepEqual(ids('7d'), ['d3']);
+		assert.deepEqual(ids('30d'), ['d20', 'd10', 'd3']);
+		assert.deepEqual(ids('90d'), ['d60', 'd20', 'd10', 'd3']);
+		// Oct 15 local: month-to-date starts Oct 1, so 20 days ago is excluded.
+		assert.deepEqual(ids('month'), ['d10', 'd3']);
+		assert.deepEqual(ids('all'), ['d100', 'd60', 'd20', 'd10', 'd3']);
+	});
+
+	it('this-month filter uses the local calendar-month boundary', () => {
+		const now = new Date(2026, 9, 15, 12, 0, 0, 0).getTime();
+		const records = [
+			makeRecord({ id: 'previous-month', timestampMs: new Date(2026, 8, 30, 23, 59, 59, 999).getTime() }),
+			makeRecord({ id: 'month-start', timestampMs: new Date(2026, 9, 1, 0, 0, 0, 0).getTime() }),
+			makeRecord({ id: 'this-month', timestampMs: new Date(2026, 9, 15, 11, 0, 0, 0).getTime() }),
+		];
+		assert.deepEqual(
+			filterThisMonth(records, now).map((record) => record.id),
+			['month-start', 'this-month'],
+		);
 	});
 
 	it('unassigned overhead groups by kind and excludes task records', () => {
@@ -774,6 +989,53 @@ describe('status selection', () => {
 		assert.equal(selected.projectId, projectA);
 		assert.equal(selected.latest?.taskId, 'task-a');
 		assert.equal(selected.taskRecords.length, 1);
+	});
+
+	it('status bar hides records at or before the visible-history cutoff', () => {
+		const now = Date.now();
+		const projectA = deriveProjectId(['file:///a']).projectId;
+		const records = [
+			makeRecord({
+				projectId: projectA,
+				projectName: 'A',
+				taskId: 'task-old',
+				chatId: 'chat-old',
+				timestampMs: now,
+			}),
+		];
+		const selected = selectStatusTask({
+			records,
+			workspaceUris: ['file:///a'],
+			nowMs: now,
+			historyCutoffMs: now,
+		});
+		assert.equal(selected.latest, undefined);
+		assert.deepEqual(selected.taskRecords, []);
+	});
+
+	it('status bar shows the latest historical task again after Restore History', async () => {
+		const now = Date.now();
+		const projectA = deriveProjectId(['file:///a']).projectId;
+		const store = createMemoryUsageStore();
+		await store.appendRequest(
+			makeRecord({ projectId: projectA, taskId: 'task-hist', chatId: 'chat-hist', timestampMs: now - 5000 }),
+		);
+		await store.appendRequest(
+			makeRecord({ projectId: projectA, taskId: 'task-hist', chatId: 'chat-hist', timestampMs: now - 4000 }),
+		);
+		const select = async () =>
+			selectStatusTask({
+				records: (await store.readRequests()).records,
+				workspaceUris: ['file:///a'],
+				nowMs: now,
+				historyCutoffMs: await store.readHistoryCutoff(),
+			});
+		await clearVisibleHistory(store, now - 1000);
+		assert.equal((await select()).latest, undefined);
+		await restoreVisibleHistory(store);
+		const restored = await select();
+		assert.equal(restored.latest?.taskId, 'task-hist');
+		assert.equal(restored.taskRecords.length, 2);
 	});
 
 	it('status bar shows empty when the active workspace has no usage', () => {
@@ -1141,10 +1403,13 @@ describe('cross-window sync signatures (R10)', () => {
 		assert.ok(!lifecycle.includes('activeDashboard?.refresh()'));
 		assert.ok(lifecycle.includes('notifyRecorded()'));
 		assert.ok(dashboard.includes('notifyRecorded()'));
-		// Dashboard clear must refresh the status bar (R11D).
-		assert.ok(lifecycle.includes('usageService.clearAll()'));
-		const clearBlock = lifecycle.slice(lifecycle.indexOf('setOnCleared'));
-		assert.ok(clearBlock.includes('activeStatusBar'));
+		// Clear/Restore History must refresh the status bar (R11D): the
+		// dashboard's history-changed hook is the status-bar refresh.
+		const ctor = lifecycle.slice(lifecycle.indexOf('new UsageDashboard('));
+		assert.ok(ctor.slice(0, ctor.indexOf(');')).includes('activeStatusBar'));
+		const afterChange = dashboard.slice(dashboard.indexOf('private async afterHistoryChanged'));
+		assert.ok(afterChange.slice(0, 200).includes('this.onHistoryChanged?.()'));
+		assert.ok(dashboard.includes('await this.afterHistoryChanged();'));
 	});
 
 	it('DC-0001: task selection only survives inside its parent chat', () => {
@@ -1198,6 +1463,57 @@ describe('cross-window sync signatures (R10)', () => {
 			),
 			{ selectedChatId: 'chat-a', selectedTaskId: null },
 		);
+	});
+
+	it('DC-0002: Clear History hides pre-cutoff detail while totals keep the retained ledger', () => {
+		const now = Date.now();
+		const cutoff = now - 10_000;
+		const records = [
+			makeRecord({ id: 'old-a', chatId: 'chat-old', taskId: 'task-old', timestampMs: now - 60_000, estimatedCostUsd: 0.5 }),
+			makeRecord({ id: 'same-ms', chatId: 'chat-old', taskId: 'task-old', timestampMs: cutoff, estimatedCostUsd: 0.25 }),
+			makeRecord({ id: 'old-overhead', chatId: null, taskId: null, requestKind: 'title', timestampMs: now - 30_000, estimatedCostUsd: 0.125 }),
+			makeRecord({ id: 'new', chatId: 'chat-new', taskId: 'task-new', timestampMs: now - 1000, estimatedCostUsd: 1 }),
+		];
+		const filters = { period: '30d', projectId: 'all', modelId: 'all', search: '' };
+		const { accounting, visible } = partitionDashboardRecords(records, filters, now, cutoff);
+		// Accounting totals include every retained record, including pre-cutoff.
+		assert.deepEqual(accounting.map((record) => record.id), ['old-a', 'same-ms', 'old-overhead', 'new']);
+		assert.equal(aggregateRequests(accounting).estimatedCostUsd, 1.875);
+		// Visible detail drops records at or before the cutoff.
+		assert.deepEqual(visible.map((record) => record.id), ['new']);
+		assert.deepEqual(rollupTasks(visible).map((task) => task.taskId), ['task-new']);
+		assert.deepEqual(rollupChats(rollupTasks(visible)).map((chat) => chat.chatId), ['chat-new']);
+		assert.equal(rollupUnassignedOverhead(visible).requests, 0);
+
+		// Restore History (cutoff 0) makes every retained record visible again.
+		const restored = partitionDashboardRecords(records, filters, now, 0);
+		assert.deepEqual(restored.visible, restored.accounting);
+		assert.deepEqual(
+			rollupTasks(restored.visible).map((task) => task.taskId).sort(),
+			['task-new', 'task-old'],
+		);
+		assert.equal(rollupUnassignedOverhead(restored.visible).requests, 1);
+		assert.deepEqual(filterVisibleHistory(records, 0), records);
+	});
+
+	it('DC-0002: period/project/model/search filters apply to accounting and visible detail alike', () => {
+		const now = new Date(2026, 9, 15, 12, 0, 0, 0).getTime();
+		const records = [
+			makeRecord({ id: 'last-month', timestampMs: new Date(2026, 8, 30, 12).getTime() }),
+			makeRecord({ id: 'other-project', projectId: 'project-other', timestampMs: now - 1000 }),
+			makeRecord({ id: 'other-model', vscodeModelId: 'muse-spark-1.2', timestampMs: now - 1000 }),
+			makeRecord({ id: 'no-match', taskPreview: 'Refactor', timestampMs: now - 1000 }),
+			makeRecord({ id: 'pre-cutoff', timestampMs: now - 5000 }),
+			makeRecord({ id: 'match', timestampMs: now - 1000 }),
+		];
+		const { accounting, visible } = partitionDashboardRecords(
+			records,
+			{ period: 'month', projectId: 'project-abc', modelId: 'muse-spark-1.3-contributor', search: 'LOGIN' },
+			now,
+			now - 2000,
+		);
+		assert.deepEqual(accounting.map((record) => record.id), ['pre-cutoff', 'match']);
+		assert.deepEqual(visible.map((record) => record.id), ['match']);
 	});
 
 	it('DC-0001: chat-first render hides top-level tasks and nests diagnostics', () => {

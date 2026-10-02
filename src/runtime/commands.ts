@@ -4,7 +4,6 @@ import { t } from '../i18n';
 import { logger } from '../logger';
 import { ensureRequestDumpRoot } from '../provider/debug';
 import type { UsageDashboard } from '../usage/dashboard';
-import type { UsageService } from '../usage/recorder';
 import type { UsageStatusBar } from '../usage/status';
 import type { UsageStore } from '../usage/storage';
 import { toCsvText } from '../usage/csv';
@@ -12,7 +11,6 @@ import { toCsvText } from '../usage/csv';
 export function registerCommands(
 	context: vscode.ExtensionContext,
 	deps?: { dashboard?: UsageDashboard; statusBar?: UsageStatusBar; store?: UsageStore },
-	getUsageService?: () => UsageService | undefined,
 ): void {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('meta-spark.showLogs', () => logger.show()),
@@ -30,7 +28,10 @@ export function registerCommands(
 		),
 		vscode.commands.registerCommand('meta-spark.exportUsageCsv', () => exportUsageCsv(deps)),
 		vscode.commands.registerCommand('meta-spark.clearUsageHistory', () =>
-			clearUsageHistory(deps, getUsageService),
+			runHistoryAction(deps?.dashboard, (dashboard) => dashboard.clearHistory()),
+		),
+		vscode.commands.registerCommand('meta-spark.restoreUsageHistory', () =>
+			runHistoryAction(deps?.dashboard, (dashboard) => dashboard.restoreHistory()),
 		),
 	);
 }
@@ -77,41 +78,23 @@ async function exportUsageCsv(deps?: { store?: UsageStore }): Promise<void> {
 	}
 }
 
-async function clearUsageHistory(
-	deps?: {
-		store?: UsageStore;
-		dashboard?: UsageDashboard;
-		statusBar?: UsageStatusBar;
-	},
-	getUsageService?: () => UsageService | undefined,
+/**
+ * Clear/Restore History from the Command Palette share the dashboard's
+ * implementation, so every path only moves the visible-history cutoff and
+ * refreshes the dashboard and status bar the same way.
+ */
+async function runHistoryAction(
+	dashboard: UsageDashboard | undefined,
+	action: (dashboard: UsageDashboard) => Promise<void>,
 ): Promise<void> {
 	try {
-		if (!deps?.store) {
+		if (!dashboard) {
 			void vscode.window.showWarningMessage(t('usage.dashboard.unavailable'));
 			return;
 		}
-		const confirmed = await vscode.window.showWarningMessage(
-			t('usage.clear.confirm'),
-			{ modal: true },
-			t('usage.clear.confirmYes'),
-		);
-		if (confirmed !== t('usage.clear.confirmYes')) {
-			return;
-		}
-		// Route through the service so the in-memory contexts cache is
-		// dropped with storage; otherwise a later request could resurrect
-		// cleared chat/task metadata.
-		const service = getUsageService?.();
-		if (service) {
-			await service.clearAll();
-		} else {
-			await deps.store.clear();
-		}
-		await deps.dashboard?.refresh();
-		await deps.statusBar?.refresh();
-		void vscode.window.showInformationMessage(t('usage.clear.done'));
+		await action(dashboard);
 	} catch (error) {
-		logger.warn('Failed to clear usage history', error);
+		logger.warn('Failed to update usage history visibility', error);
 		void vscode.window.showErrorMessage(t('usage.dashboard.actionFailed'));
 	}
 }

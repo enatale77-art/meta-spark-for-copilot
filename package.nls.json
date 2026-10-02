@@ -8,6 +8,7 @@
   "meta-spark.command.openUsageDashboard": "Meta Spark: Open Usage Dashboard",
   "meta-spark.command.exportUsageCsv": "Meta Spark: Export Usage CSV",
   "meta-spark.command.clearUsageHistory": "Meta Spark: Clear Usage History",
+  "meta-spark.command.restoreUsageHistory": "Meta Spark: Restore Usage History",
   "meta-spark.walkthrough.title": "Muse Spark for Copilot Chat",
   "meta-spark.walkthrough.description": "Set up Muse Spark 1.3 (and earlier versions) in Copilot Chat.",
   "meta-spark.walkthrough.setApiKey.title": "Set your Meta API key",
