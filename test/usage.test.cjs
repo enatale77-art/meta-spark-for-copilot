@@ -9,6 +9,7 @@ const { randomUUID } = require('node:crypto');
 const {
 	aggregateRequests,
 	filterByTime,
+	filterThisMonth,
 	rollupChats,
 	rollupTasks,
 	rollupUnassignedOverhead,
@@ -700,6 +701,19 @@ describe('aggregation', () => {
 		assert.equal(filterByTime(records, now, 7).length, 2);
 		assert.equal(filterByTime(records, now, 1).length, 1);
 		assert.equal(filterByTime(records, now, null).length, 2);
+	});
+
+	it('this-month filter uses the local calendar-month boundary', () => {
+		const now = new Date(2026, 9, 15, 12, 0, 0, 0).getTime();
+		const records = [
+			makeRecord({ id: 'previous-month', timestampMs: new Date(2026, 8, 30, 23, 59, 59, 999).getTime() }),
+			makeRecord({ id: 'month-start', timestampMs: new Date(2026, 9, 1, 0, 0, 0, 0).getTime() }),
+			makeRecord({ id: 'this-month', timestampMs: new Date(2026, 9, 15, 11, 0, 0, 0).getTime() }),
+		];
+		assert.deepEqual(
+			filterThisMonth(records, now).map((record) => record.id),
+			['month-start', 'this-month'],
+		);
 	});
 
 	it('unassigned overhead groups by kind and excludes task records', () => {
