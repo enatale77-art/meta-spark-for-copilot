@@ -46,8 +46,10 @@ const { escapeCsvField, toCsvText } = require('../out/usage/csv.js');
 const { calculateCost, resolvePricing, splitUsageTokens } = require('../out/usage/pricing.js');
 const {
 	parseContextsText,
+	parseHistoryStateText,
 	parseLedgerText,
 	serializeContexts,
+	serializeHistoryState,
 	serializeRecord,
 	usageClearTargets,
 } = require('../out/usage/storage.js');
@@ -512,8 +514,11 @@ describe('persistence', () => {
 		assert.equal(parseContextsText('{{{').corrupted, true);
 	});
 
-	it('clear-history scope targets only usage-v1 files', () => {
-		assert.deepEqual(usageClearTargets(), ['usage-v1/requests.jsonl', 'usage-v1/contexts.json']);
+	it('clear-history only updates the visibility marker and never targets accounting files', () => {
+		assert.deepEqual(usageClearTargets(), ['usage-v1/history-state.json']);
+		const serialized = serializeHistoryState(1234);
+		assert.equal(parseHistoryStateText(serialized), 1234);
+		assert.equal(parseHistoryStateText('{{{'), 0);
 	});
 
 	it('true-append ledger keeps prior records across sequential appends', async () => {
@@ -584,7 +589,7 @@ describe('persistence', () => {
 		}
 	});
 
-	it('clearAll drops the contexts cache so later requests cannot resurrect cleared metadata', async () => {
+	it('clearAll preserves accounting data and advances only the visible-history cutoff', async () => {
 		const Module = require('node:module');
 		const { join } = require('node:path');
 		const stubPath = join(__dirname, 'vscode-stub.cjs');
@@ -606,6 +611,7 @@ describe('persistence', () => {
 				getWorkspaceUris: () => ['file:///demo'],
 				getWorkspaceName: () => 'Demo',
 			});
+			await store.appendRequest(makeRecord({ id: 'retained-before-clear' }));
 			const pending = await service.beginRequest({
 				messages: [],
 				requestKind: 'main-agent',
@@ -614,23 +620,17 @@ describe('persistence', () => {
 			});
 			assert.ok(pending.allocation.chatId);
 			assert.ok(pending.allocation.taskId);
-			const before = await store.readContexts();
-			assert.equal(Object.keys(before.chats).length, 1);
+			const beforeContexts = await store.readContexts();
+			assert.equal(Object.keys(beforeContexts.chats).length, 1);
 
-			await service.clearAll();
-			const cleared = await store.readContexts();
-			assert.deepEqual(cleared, emptyContexts());
+			await service.clearAll(1234567890);
 
-			// The service cache was invalidated with storage; the next request
-			// must not write the stale pre-clear chat/task back to disk.
-			await service.beginRequest({
-				messages: [],
-				requestKind: 'chat-title',
-				vscodeModelId: 'muse-spark-1.3',
-				apiModelId: 'muse-spark-1.3',
-			});
-			const after = await store.readContexts();
-			assert.deepEqual(after, emptyContexts());
+			const ledgerAfter = await store.readRequests();
+			const contextsAfter = await store.readContexts();
+			assert.equal(ledgerAfter.records.length, 1);
+			assert.equal(ledgerAfter.records[0].id, 'retained-before-clear');
+			assert.deepEqual(contextsAfter, beforeContexts);
+			assert.equal(await store.readHistoryCutoff(), 1234567890);
 		} finally {
 			Module._resolveFilename = originalResolve;
 			console.warn = originalWarn;
@@ -1212,6 +1212,22 @@ describe('cross-window sync signatures (R10)', () => {
 			),
 			{ selectedChatId: 'chat-a', selectedTaskId: null },
 		);
+	});
+
+	it('usage periods include 1D and retained accounting is separate from visible details', () => {
+		const fs = require('node:fs');
+		const path = require('node:path');
+		const dashboard = fs.readFileSync(
+			path.join(__dirname, '..', 'src', 'usage', 'dashboard.ts'),
+			'utf8',
+		);
+		assert.ok(
+			dashboard.includes("renderOptions(['1d', '7d', '30d', '90d', 'month', 'all']"),
+		);
+		assert.ok(dashboard.includes("option === '1d'"));
+		assert.ok(dashboard.includes('const visibleRecords ='));
+		assert.ok(dashboard.includes('const totals = aggregateRequests(records);'));
+		assert.ok(dashboard.includes('readHistoryCutoff()'));
 	});
 
 	it('DC-0001: chat-first render hides top-level tasks and nests diagnostics', () => {
