@@ -1,0 +1,59 @@
+{
+  "description": "Redacted structural fixture derived from seven Agent Host provider-input snapshots for one hello chat.",
+  "redaction": {
+    "systemPrompt": "Original system and reminder text replaced with fixed safe text; the Agent Host identity prefix and session_context path shape are preserved.",
+    "humanPrompt": "The original human text and reminder content are replaced with the safe prompt hello and fixed reminder text.",
+    "tools": "All tool names, inputs, and results are replaced with fixture_tool, empty objects, and fixed safe text.",
+    "identifiers": "Raw session UUID and tool-call IDs are replaced consistently. cN/rN preserve each tool-call/result relationship.",
+    "paths": "The username is replaced with REDACTED and the session UUID with a fixture UUID."
+  },
+  "sessionFolder": "c:/Users/REDACTED/.copilot/session-state/00000000-0000-4000-8000-000000000001",
+  "currentDatetime": "2026-10-01T22:48:28.182-07:00",
+  "humanText": "hello",
+  "toolCount": 380,
+  "shapeEncoding": "Each snapshot shape is a semicolon-separated message list. s/a/u mean system/assistant/user; t is a redacted text part; cN is a tool call; rN is its matching result. Synthetic IDs retain the observed call/result relationships.",
+  "snapshots": [
+    {
+      "basename": "meta-provider-input-2026-10-02T05-48-28-320Z-0001",
+      "sha256": "92b2ddd9ae98474baf150a09b70be973652c3a59b697f98d74dfc154af7e2fe6",
+      "messageCount": 2,
+      "shape": "s:t;u:t"
+    },
+    {
+      "basename": "meta-provider-input-2026-10-02T05-48-32-801Z-0002",
+      "sha256": "f24cc1dba0ffb3327d5b55d41c3d91e380eb1b143fc303f47616a455545f486f",
+      "messageCount": 4,
+      "shape": "s:t;u:t;a:t,c1;u:r1"
+    },
+    {
+      "basename": "meta-provider-input-2026-10-02T05-48-35-382Z-0003",
+      "sha256": "e5ba6d3848fc9ccc371a2e0be147d0f4a70523d099f80dbc28265f8663e85667",
+      "messageCount": 8,
+      "shape": "s:t;u:t;a:t,c1;u:r1;a:c2,c3,c4;u:r3;u:r4;u:r2"
+    },
+    {
+      "basename": "meta-provider-input-2026-10-02T05-48-42-909Z-0004",
+      "sha256": "43be03355c8ecdc001592f460f24e6d390bfdc4691f6a0f8241b7ba9703e1a21",
+      "messageCount": 10,
+      "shape": "s:t;u:t;a:t,c1;u:r1;a:c2,c3,c4;u:r3;u:r4;u:r2;a:t,c5;u:r5"
+    },
+    {
+      "basename": "meta-provider-input-2026-10-02T05-48-59-417Z-0005",
+      "sha256": "b26da9c61cd1b4db26d661de212106585bdbef2c2160aaa39dbb2fa560de0456",
+      "messageCount": 12,
+      "shape": "s:t;u:t;a:t,c1;u:r1;a:c2,c3,c4;u:r3;u:r4;u:r2;a:t,c5;u:r5;a:t,c6;u:r6"
+    },
+    {
+      "basename": "meta-provider-input-2026-10-02T05-49-04-795Z-0006",
+      "sha256": "69f47a5c53baba1645b80d883cc3da34a615a39dbe62511f4610995954b79c46",
+      "messageCount": 15,
+      "shape": "s:t;u:t;a:t,c1;u:r1;a:c2,c3,c4;u:r3;u:r4;u:r2;a:t,c5;u:r5;a:t,c6;u:r6;a:c7,c8;u:r7;u:r8"
+    },
+    {
+      "basename": "meta-provider-input-2026-10-02T05-51-11-353Z-0007",
+      "sha256": "d9ac371deb36e53733ac7acdc4f13e5295466b4d9264c3023e84719f87a8a317",
+      "messageCount": 20,
+      "shape": "s:t;u:t;a:t,c1;u:r1;a:c2,c3,c4;u:r3;u:r4;u:r2;a:t,c5;u:r5;a:t,c6;u:r6;a:c7,c8;u:r7;u:r8;a:t,c9,c10,c11,c12;u:r11;u:r9;u:r10;u:r12"
+    }
+  ]
+}

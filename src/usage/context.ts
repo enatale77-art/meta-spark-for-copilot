@@ -44,7 +44,10 @@ export interface CorrelationMessage {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TERMINAL_NOTIFICATION_PATTERN = /^\[Terminal\s+\S+\s+notification:/;
-const CONTROL_UPDATE_PATTERNS = [/<customizationsUpdate>/, /\[meta-spark-/];
+// `<skill-context …>` is injected by the Agent Host as a user-role message when a skill loads; it
+// is scaffolding, not a human turn. Anchored because Agent Host human prompts open with
+// `<current_datetime>`.
+const CONTROL_UPDATE_PATTERNS = [/<customizationsUpdate>/, /\[meta-spark-/, /^\s*<skill-context\b/];
 
 /**
  * Pure allocation logic: decides chat/task identity for an incoming request.
@@ -165,10 +168,33 @@ export function hasNewSubstantiveTurnAfterMarker(messages: readonly CorrelationM
 			markerIndex = i;
 		}
 	}
+	if (markerIndex === 0) {
+		return hasUnansweredHumanTurn(messages);
+	}
 	for (let i = markerIndex + 1; i < messages.length; i += 1) {
 		const msg = messages[i];
 		if (isSubstantiveHumanTurn(msg)) {
 			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * The Agent Host replays `previousResponseId` as a leading assistant message that carries only
+ * the marker, ahead of the system prompt and the history. That marker is a pointer to the last
+ * response, not a position inside the history, so "after the marker" would count every earlier
+ * human turn as new. Instead the turn is new only when the latest human turn has no assistant
+ * message after it (a tool-loop continuation always has the assistant tool call after it).
+ * This also holds when the host sends only the new input items.
+ */
+function hasUnansweredHumanTurn(messages: readonly CorrelationMessage[]): boolean {
+	for (let i = messages.length - 1; i > 0; i -= 1) {
+		if (isSubstantiveHumanTurn(messages[i])) {
+			return true;
+		}
+		if (messages[i].role === 'assistant') {
+			return false;
 		}
 	}
 	return false;

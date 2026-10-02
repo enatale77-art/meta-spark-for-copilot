@@ -963,6 +963,117 @@ describe('aggregation', () => {
 });
 
 describe('status selection', () => {
+	it('matches live recorded workspace identities and explains an empty workspace status', async (testContext) => {
+		let clockMs = 1790917936499;
+		testContext.mock.method(Date, 'now', () => clockMs);
+		const museUri = 'file:///d%3A/Development/Muse%20VS%20Code%20Extension';
+		const enaxUri = 'file:///d%3A/Development/ENAX-Konnect-Testing';
+		const store = createMemoryUsageStore();
+		const { UsageService } = requireWithVscodeStub('../out/usage/recorder.js');
+		const museService = new UsageService({
+			store,
+			getWorkspaceUris: () => [museUri],
+			getWorkspaceName: () => 'Muse VS Code Extension',
+		});
+		const enaxService = new UsageService({
+			store,
+			getWorkspaceUris: () => [enaxUri],
+			getWorkspaceName: () => 'ENAX-Konnect-Testing',
+		});
+		const museProject = museService.resolveProject();
+		const enaxProject = enaxService.resolveProject();
+		assert.equal(museProject.projectId, 'project-2c5fb716d3260d30315108287079a0fd');
+		assert.equal(enaxProject.projectId, 'project-0d59d8f93313448030f1b5dc19795465');
+
+		const musePending = await museService.beginRequest({
+			messages: [],
+			requestKind: 'main-agent',
+			vscodeModelId: 'muse-spark-1.3-contributor',
+			apiModelId: 'muse-spark-1.3-contributor',
+		});
+		const museRecord = await museService.recordCompleted(musePending, {
+			usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+		});
+		assert.equal(museRecord.projectId, museProject.projectId);
+		assert.equal(museRecord.status, 'completed');
+		assert.ok(museRecord.taskId);
+
+		const now = clockMs;
+		const oldMuseRecord = makeRecord({
+			id: 'muse-outside-30-days',
+			projectId: museProject.projectId,
+			taskId: 'old-muse-task',
+			chatId: 'old-muse-chat',
+			timestampMs: now - 31 * 24 * 60 * 60 * 1000,
+		});
+		await store.appendRequest(oldMuseRecord);
+
+		// All seven rows use the recorder's real workspace resolver and completion path.
+		clockMs = 1790917938221;
+		const enaxPending = await enaxService.beginRequest({
+			messages: [],
+			requestKind: 'main-agent',
+			vscodeModelId: 'muse-spark-1.3-contributor',
+			apiModelId: 'muse-spark-1.3-contributor',
+		});
+		const enaxRecords = [];
+		for (let i = 0; i < 7; i += 1) {
+			clockMs += i === 0 ? 0 : 1;
+			const record = await enaxService.recordCompleted(enaxPending, {
+				usage: { prompt_tokens: 10 + i, completion_tokens: 2, total_tokens: 12 + i },
+			});
+			assert.ok(record);
+			enaxRecords.push(record);
+		}
+		assert.ok(enaxRecords.every((record) => record.projectId === enaxProject.projectId));
+
+		const ledger = (await store.readRequests()).records;
+		clockMs = Date.parse('2026-10-02T16:30:00.000Z');
+		const museUncleared = selectStatusTask({ records: ledger, workspaceUris: [museUri], nowMs: clockMs });
+		assert.equal(museUncleared.latest?.taskId, museRecord.taskId);
+		assert.deepEqual(museUncleared.taskRecords.map((record) => record.id), [museRecord.id]);
+		const museWithCutoff = selectStatusTask({
+			records: ledger,
+			workspaceUris: [museUri],
+			nowMs: clockMs,
+			historyCutoffMs: 1790917938220,
+		});
+		assert.equal(museWithCutoff.latest, undefined);
+		assert.deepEqual(museWithCutoff.taskRecords, []);
+
+		const enaxSelection = selectStatusTask({
+			records: ledger,
+			workspaceUris: [enaxUri],
+			nowMs: clockMs,
+			historyCutoffMs: 1790917938220,
+		});
+		assert.equal(enaxSelection.latest?.taskId, enaxRecords[6].taskId);
+		assert.equal(enaxSelection.taskRecords.length, 7);
+		assert.deepEqual(
+			selectStatusTask({ records: [oldMuseRecord], workspaceUris: [museUri], nowMs: now }).taskRecords,
+			[],
+			'completed records outside the 30-day window are excluded',
+		);
+
+		const vscodeStub = require('./vscode-stub.cjs');
+		const previousEnv = vscodeStub.env;
+		vscodeStub.env = { language: 'en' };
+		try {
+			const { t } = requireWithVscodeStub('../out/i18n.js');
+			assert.equal(t('usage.status.empty'), 'Muse: no recent workspace usage');
+			assert.match(t('usage.status.emptyTooltip'), /completed Muse usage is visible for this workspace/);
+			vscodeStub.env.language = 'zh-cn';
+			assert.match(t('usage.status.empty'), /工作区/);
+			assert.match(t('usage.status.emptyTooltip'), /已完成 Muse 用量/);
+		} finally {
+			if (previousEnv === undefined) {
+				delete vscodeStub.env;
+			} else {
+				vscodeStub.env = previousEnv;
+			}
+		}
+	});
+
 	it('status bar selects the active project task and ignores other projects', () => {
 		const now = Date.now();
 		const projectA = deriveProjectId(['file:///a']).projectId;
@@ -1650,5 +1761,41 @@ describe('cross-window sync signatures (R10)', () => {
 			),
 			{ selectedChatId: 'chat-a', selectedTaskId: 'task-1' },
 		);
+	});
+});
+
+describe('Agent Host previousResponseId pointer (leading marker)', () => {
+	const chatId = randomUUID();
+	const taskId = randomUUID();
+	const marker = { valid: true, chatId, taskId, version: 1, writer: 'meta-spark-for-copilot' };
+	const sys = { ...userText(''), role: 'other', isHumanUserText: false, partCount: 1 };
+	const assistant = () => ({ ...userText(''), role: 'assistant', isHumanUserText: false });
+	const skillContext = () => ({ ...userText('<skill-context name="x">…</skill-context>'), hasControlUpdate: true });
+	const allocate = (messages) =>
+		allocateUsageContext({ messages, requestKind: 'main-agent', marker, projectId: 'p', projectName: 'P' });
+
+	it('tool-loop continuation over the full history inherits the task', () => {
+		const result = allocate([markerHolder(chatId, taskId), sys, userText('Fix it'), assistant(), toolOnly()]);
+		assert.equal(result.taskId, taskId);
+		assert.equal(result.isNewTask, false);
+	});
+
+	it('delta input with only a tool result inherits the task', () => {
+		assert.equal(allocate([markerHolder(chatId, taskId), sys, toolOnly()]).taskId, taskId);
+	});
+
+	it('an injected skill-context message is not a new human turn', () => {
+		const result = allocate([markerHolder(chatId, taskId), sys, userText('Fix it'), assistant(), toolOnly(), skillContext()]);
+		assert.equal(result.taskId, taskId);
+	});
+
+	it('a human prompt after the last assistant message starts a new task in the same chat', () => {
+		const full = allocate([markerHolder(chatId, taskId), sys, userText('Fix it'), assistant(), toolOnly(), assistant(), userText('Now docs')]);
+		const delta = allocate([markerHolder(chatId, taskId), sys, userText('Now docs')]);
+		for (const result of [full, delta]) {
+			assert.equal(result.chatId, chatId);
+			assert.notEqual(result.taskId, taskId);
+			assert.equal(result.isNewTask, true);
+		}
 	});
 });

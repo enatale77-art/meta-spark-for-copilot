@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.2.3
+
+### Fixes
+
+- **One Agent Host conversation split into multiple Local Chats** — Correlate full-history SDK calls using the native session identity and original human-turn stamp when no replay marker returns. Tool continuations keep their task; later human prompts create tasks in the same chat. Separate sessions with identical prompts stay separate.
+- **Ambiguous empty usage status** — The status bar now explicitly describes recent usage in the current workspace, including cleared-history and 30-day filtering. The dashboard's All-project view remains independent.
+- **Usage dashboard showed 0 Local chats for VS Code Agent Host sessions** — Agent Host requests (system prompt `You are an AI assistant using Copilot SDK in VS Code.`) were classified as background, so every request was recorded as unassigned Copilot overhead and no chat/task was created. They are now recognized as the main agent, so chats and tasks are created, carried across turns, and shown in the dashboard. Tool-loop continuations stay in the same task and a new human prompt starts a new task in the same chat, including when the host replays `previousResponseId`; injected `<skill-context>` messages are no longer mistaken for human prompts. Utility and sub-agent requests are still classified as non-main and do not create chats
+
 ## 2.2.2
 
 ### Changes

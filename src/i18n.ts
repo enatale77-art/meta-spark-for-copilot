@@ -145,8 +145,9 @@ const zh: Translations = {
 	'usage.restore.title': '恢复历史',
 	'usage.restore.done': '已恢复历史；所有保留的会话、任务和开销记录已重新显示。',
 	'usage.restore.nothingHidden': '没有被隐藏的用量历史，所有记录均已显示。',
-	'usage.status.empty': 'Muse：暂无用量',
-	'usage.status.emptyTooltip': '过去 30 天没有已跟踪的 Muse 用量。',
+	'usage.status.empty': 'Muse：此工作区暂无近期用量',
+	'usage.status.emptyTooltip':
+		'过去 30 天内，此工作区没有可见的已完成 Muse 用量。已清除的历史记录会保持隐藏，直到恢复。',
 	'usage.status.text': 'Muse {0} 请求 · {1} token · {2}',
 	'usage.status.tooltipTitle': 'Muse Spark — 最近跟踪的任务',
 };
@@ -404,8 +405,9 @@ const en: Translations = {
 	'usage.restore.done':
 		'History restored; all retained chats, tasks, and overhead are visible again.',
 	'usage.restore.nothingHidden': 'No usage history is hidden; everything is already visible.',
-	'usage.status.empty': 'Muse: no usage yet',
-	'usage.status.emptyTooltip': 'No tracked Muse usage in the last 30 days.',
+	'usage.status.empty': 'Muse: no recent workspace usage',
+	'usage.status.emptyTooltip':
+		'No completed Muse usage is visible for this workspace in the last 30 days. Cleared history stays hidden until restored.',
 	'usage.status.text': 'Muse {0} req · {1} tok · {2}',
 	'usage.status.tooltipTitle': 'Muse Spark — most recent tracked task',
 };

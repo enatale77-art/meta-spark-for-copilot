@@ -75,6 +75,7 @@ export interface ContextsFile {
 export interface UsageAllocation {
 	chatId: string | null;
 	taskId: string | null;
+	nativeSessionId?: string;
 	projectId: string;
 	projectName: string;
 	isNewChat: boolean;

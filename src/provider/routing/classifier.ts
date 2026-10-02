@@ -30,6 +30,12 @@ const GIT_COMMIT_MESSAGE_PREFIX =
 	'You are an AI programming assistant, helping a software developer to come with the best git commit message';
 const RENAME_SUGGESTIONS_PREFIX = 'You are a distinguished software engineer';
 const MAIN_AGENT_PREFIX = 'You are an expert AI programming assistant';
+// VS Code Agent Host (Copilot SDK) sessions open the system prompt with an identity statement:
+// "You are an AI assistant using Copilot SDK in VS Code. You help users with software engineering
+// tasks." Only that stable lead-in is matched so the wording after it can change. Request
+// initiator ("core"), tool count, and the `<current_datetime>` user preamble look the same for
+// sub-agent and utility calls, so they are not used to create main-agent requests.
+const AGENT_HOST_MAIN_AGENT_PREFIX = 'You are an AI assistant using Copilot SDK';
 const TERMINAL_NOTIFICATION_PATTERN = /^\[Terminal\s+\S+\s+notification:/;
 const REQUEST_KINDS_WITH_FORCED_MINIMAL_THINKING = new Set<RequestKind>([
 	'todo-tracker',
@@ -127,6 +133,7 @@ function classifyRequest(input: {
 	}
 	if (
 		firstText.startsWith(MAIN_AGENT_PREFIX) ||
+		firstText.startsWith(AGENT_HOST_MAIN_AGENT_PREFIX) ||
 		firstText.includes('<skills>') ||
 		firstText.includes('<agents>')
 	) {
@@ -150,12 +157,19 @@ function getMetaToolName(tool: MetaTool): string {
 	return tool.function.name;
 }
 
+/**
+ * The identifying prompt is the first message that has text, which is not always `messages[0]`:
+ * when the Agent Host replays a `previousResponseId` it prepends an assistant message that holds
+ * only the `stateful_marker` data part, ahead of the system prompt.
+ */
 function getFirstVscodeText(messages: readonly vscode.LanguageModelChatRequestMessage[]): string {
-	const firstMessage = messages[0];
-	if (!firstMessage) {
-		return '';
+	for (const message of messages) {
+		const text = getVscodeMessageText(message);
+		if (text) {
+			return text;
+		}
 	}
-	return getVscodeMessageText(firstMessage);
+	return '';
 }
 
 function getLatestVscodeUserText(
@@ -181,10 +195,16 @@ function getVscodeMessageText(message: vscode.LanguageModelChatRequestMessage): 
 }
 
 function getFirstMetaText(messages: MetaMessage[]): string {
-	const first = messages[0];
-	if (!first) return '';
-	if (typeof first.content === 'string') return first.content;
-	return first.content
+	for (const message of messages) {
+		const text = getMetaMessageText(message);
+		if (text) return text;
+	}
+	return '';
+}
+
+function getMetaMessageText(message: MetaMessage): string {
+	if (typeof message.content === 'string') return message.content;
+	return message.content
 		.filter((p) => p.type === 'text')
 		.map((p) => (p as any).text)
 		.join('');
