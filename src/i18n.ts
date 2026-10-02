@@ -131,14 +131,17 @@ const zh: Translations = {
 		'本地主题取自该会话首个已清理的人类任务预览；不是原生 Copilot 会话标题。',
 	'usage.dashboard.localChatNote':
 		'本地会话 ID 由本扩展生成，用于归组任务；v1 无法深链到原生 Copilot 会话。',
+	'usage.dashboard.historyRetained':
+		'可见历史已清除到 {0}。用量账本仍保留，用于汇总和计费。',
 	'usage.export.title': '导出 CSV',
 	'usage.export.empty': '没有可导出的用量记录。',
 	'usage.export.saveLabel': '导出用量 CSV',
 	'usage.export.done': '已导出 {0} 条用量记录。',
 	'usage.clear.title': '清除历史',
-	'usage.clear.confirm': '清除本地保存的全部 Muse 用量历史？API Key 与设置不受影响。',
-	'usage.clear.confirmYes': '清除用量历史',
-	'usage.clear.done': '用量历史已清除。',
+	'usage.clear.confirm':
+		'清除可见的 Muse 会话历史？底层用量账本和计费数据会保留。',
+	'usage.clear.confirmYes': '清除可见历史',
+	'usage.clear.done': '可见历史已清除；用量账本已保留。',
 	'usage.status.empty': 'Muse：暂无用量',
 	'usage.status.emptyTooltip': '过去 30 天没有已跟踪的 Muse 用量。',
 	'usage.status.text': 'Muse {0} 请求 · {1} token · {2}',
@@ -383,15 +386,17 @@ const en: Translations = {
 		'Local subject is the first cleaned human task preview in this chat; it is not the native Copilot session title.',
 	'usage.dashboard.localChatNote':
 		'Local Chat IDs are owned by this extension for grouping tasks. v1 cannot deep-link to the exact native Copilot chat.',
+	'usage.dashboard.historyRetained':
+		'Visible history was cleared through {0}. Usage accounting remains retained for rollups and billing.',
 	'usage.export.title': 'Export CSV',
 	'usage.export.empty': 'No usage records to export.',
 	'usage.export.saveLabel': 'Export usage CSV',
 	'usage.export.done': 'Exported {0} usage record(s).',
 	'usage.clear.title': 'Clear history',
 	'usage.clear.confirm':
-		'Clear all locally stored Muse usage history? API keys and settings are kept.',
-	'usage.clear.confirmYes': 'Clear usage history',
-	'usage.clear.done': 'Usage history cleared.',
+		'Clear visible Muse chat history? The underlying usage ledger and billing data will be retained.',
+	'usage.clear.confirmYes': 'Clear visible history',
+	'usage.clear.done': 'Visible history cleared; usage accounting was retained.',
 	'usage.status.empty': 'Muse: no usage yet',
 	'usage.status.emptyTooltip': 'No tracked Muse usage in the last 30 days.',
 	'usage.status.text': 'Muse {0} req · {1} tok · {2}',
