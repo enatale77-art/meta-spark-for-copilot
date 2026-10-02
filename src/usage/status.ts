@@ -42,7 +42,7 @@ export class UsageStatusBar {
 				records: ledger.records,
 				workspaceUris,
 				nowMs: Date.now(),
-				hiddenBeforeMs: historyCutoffMs,
+				historyCutoffMs,
 			});
 			if (!latest) {
 				this.item.text = t('usage.status.empty');

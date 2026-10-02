@@ -91,6 +91,10 @@
       {
         "command": "meta-spark.clearUsageHistory",
         "title": "%meta-spark.command.clearUsageHistory%"
+      },
+      {
+        "command": "meta-spark.restoreUsageHistory",
+        "title": "%meta-spark.command.restoreUsageHistory%"
       }
     ],
     "walkthroughs": [

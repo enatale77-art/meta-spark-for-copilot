@@ -63,17 +63,6 @@ export class UsageService {
 		this.getWorkspaceName = options.getWorkspaceName ?? defaultWorkspaceName;
 	}
 
-	/**
-	 * Clear visible chat/detail history without deleting accounting data.
-	 * The ledger and contexts remain in global storage for billing rollups and
-	 * survive normal extension upgrades. Every clear path must go through here.
-	 */
-	async clearAll(hiddenBeforeMs = Date.now()): Promise<void> {
-		await this.store.clearHistory(hiddenBeforeMs);
-		// Reload persisted contexts after the visibility boundary changes.
-		this.invalidateContextsCache();
-	}
-
 	resolveProject(): { projectId: string; projectName: string } {
 		const uris = this.getWorkspaceUris();
 		const derived = deriveProjectId(uris);
@@ -330,11 +319,6 @@ export class UsageService {
 		}
 		this.contextsLoaded = true;
 		return this.contextsCache ?? emptyContexts();
-	}
-
-	invalidateContextsCache(): void {
-		this.contextsLoaded = false;
-		this.contextsCache = null;
 	}
 }
 

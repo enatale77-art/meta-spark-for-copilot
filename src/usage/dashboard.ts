@@ -1,19 +1,22 @@
 ﻿import vscode from 'vscode';
 import {
 	aggregateRequests,
-	filterByTime,
-	filterThisMonth,
+	filterByPeriod,
+	filterVisibleHistory,
+	isUsagePeriod,
 	rollupChats,
 	rollupTasks,
 	rollupUnassignedOverhead,
+	USAGE_PERIODS,
+	type UsagePeriod,
 } from './aggregate';
 import { toCsvText } from './csv';
 import { t } from '../i18n';
 import { logger } from '../logger';
 import type { UsageRequestRecord } from './types';
-import type { UsageStore } from './storage';
+import { clearVisibleHistory, restoreVisibleHistory, type UsageStore } from './storage';
 
-export type UsagePeriod = '1d' | '7d' | '30d' | '90d' | 'month' | 'all';
+export type { UsagePeriod } from './aggregate';
 
 export interface UsageDashboardState {
 	period: UsagePeriod;
@@ -153,6 +156,35 @@ export interface DashboardSelection {
 }
 
 /**
+ * DC-0002 (pure, unit-tested): split the ledger into the records that feed
+ * summary accounting and the records whose chat/task/overhead detail is
+ * still visible. Period/project/model/search filters apply to both; the
+ * Clear History cutoff only applies to visible detail, so summary totals
+ * always come from the complete retained ledger.
+ */
+export function partitionDashboardRecords(
+	allRecords: readonly UsageRequestRecord[],
+	filters: Pick<UsageDashboardState, 'period' | 'projectId' | 'modelId' | 'search'>,
+	nowMs: number,
+	historyCutoffMs: number,
+): { accounting: UsageRequestRecord[]; visible: UsageRequestRecord[] } {
+	let accounting = filterByPeriod(allRecords, filters.period, nowMs);
+	if (filters.projectId !== 'all') {
+		accounting = accounting.filter((record) => record.projectId === filters.projectId);
+	}
+	if (filters.modelId !== 'all') {
+		accounting = accounting.filter((record) => record.vscodeModelId === filters.modelId);
+	}
+	const query = filters.search.trim().toLowerCase();
+	if (query) {
+		accounting = accounting.filter((record) =>
+			(record.taskPreview ?? '').toLowerCase().includes(query),
+		);
+	}
+	return { accounting, visible: filterVisibleHistory(accounting, historyCutoffMs) };
+}
+
+/**
  * DC-0001 chat-first selection rule (pure, unit-tested): a task is only
  * selected in the context of its parent chat. Switching to another chat,
  * collapsing the chat, or losing the chat to filters clears the task.
@@ -197,18 +229,20 @@ export class UsageDashboard {
 	private pendingSignature: UsageChangeSignature | undefined;
 	private lastRefreshMs = 0;
 	private refreshInFlight = false;
+	private refreshQueued = false;
 	private notifyTimer: NodeJS.Timeout | undefined;
 	private notifyPending = false;
 
+	/**
+	 * @param onHistoryChanged Runs after Clear/Restore History changes the
+	 * visible-history cutoff in this window (e.g. to refresh the status bar).
+	 * Other windows pick the change up through the change signature.
+	 */
 	constructor(
 		private readonly context: vscode.ExtensionContext,
 		private readonly store: UsageStore,
-		private onCleared?: () => void | Promise<void>,
+		private readonly onHistoryChanged?: () => void | Promise<void>,
 	) {}
-
-	setOnCleared(onCleared: () => void | Promise<void>): void {
-		this.onCleared = onCleared;
-	}
 
 	async open(): Promise<void> {
 		if (this.panel) {
@@ -290,42 +324,6 @@ export class UsageDashboard {
 		}
 	}
 
-	async refresh(): Promise<void> {
-		if (!this.panel) {
-			return;
-		}
-		try {
-			const ledger = await this.store.readRequests();
-			const contexts = await this.store.readContexts();
-			const historyCutoffMs = await this.store.readHistoryCutoff();
-			this.viewState = {
-				period: '30d',
-				projectId: 'all',
-				modelId: 'all',
-				search: '',
-				selectedTaskId: null,
-				selectedChatId: null,
-				overheadExpanded: false,
-			};
-			this.lastSignature = await this.readSignature().catch(() => undefined);
-			this.lastRefreshMs = Date.now();
-			this.panel.webview.html = this.renderDashboard(
-				ledger.records,
-				contexts,
-				this.viewState,
-				historyCutoffMs,
-			).html;
-			if (ledger.corruptedLines > 0) {
-				logger.warn(
-					`[usage] Ignored ${ledger.corruptedLines} corrupted ledger line(s); history remains readable.`,
-				);
-			}
-		} catch (error) {
-			logger.warn('[usage] Failed to render dashboard', error);
-			this.panel.webview.html = this.renderShell(t('usage.dashboard.loadFailed'));
-		}
-	}
-
 	private async handleMessage(message: {
 		command?: string;
 		[key: string]: unknown;
@@ -372,6 +370,8 @@ export class UsageDashboard {
 				await this.exportCsv();
 			} else if (message.command === 'clear') {
 				await this.clearHistory();
+			} else if (message.command === 'restore') {
+				await this.restoreHistory();
 			} else if (message.command === 'copy') {
 				const value = typeof message.value === 'string' ? message.value : '';
 				await vscode.env.clipboard.writeText(value);
@@ -402,7 +402,12 @@ export class UsageDashboard {
 		void vscode.window.showInformationMessage(t('usage.export.done', ledger.records.length));
 	}
 
-	private async clearHistory(): Promise<void> {
+	/**
+	 * Clear History (dashboard button and Command Palette): after
+	 * confirmation, advance the visible-history cutoff. `requests.jsonl` and
+	 * `contexts.json` are never modified, so accounting totals are unchanged.
+	 */
+	async clearHistory(): Promise<void> {
 		const confirmed = await vscode.window.showWarningMessage(
 			t('usage.clear.confirm'),
 			{ modal: true },
@@ -411,15 +416,29 @@ export class UsageDashboard {
 		if (confirmed !== t('usage.clear.confirmYes')) {
 			return;
 		}
-		// The lifecycle onCleared hook routes through UsageService.clearAll()
-		// so storage deletion and contexts-cache invalidation stay together.
-		if (this.onCleared) {
-			await this.onCleared();
-		} else {
-			await this.store.clearHistory(Date.now());
-		}
-		await this.refresh();
+		await clearVisibleHistory(this.store);
+		await this.afterHistoryChanged();
 		void vscode.window.showInformationMessage(t('usage.clear.done'));
+	}
+
+	/**
+	 * Restore History (dashboard button and Command Palette): reset the
+	 * visible-history cutoff so all retained chat/task/overhead detail shows
+	 * again. Non-destructive and idempotent, so no confirmation is needed.
+	 */
+	async restoreHistory(): Promise<void> {
+		const restored = await restoreVisibleHistory(this.store);
+		if (restored) {
+			await this.afterHistoryChanged();
+		}
+		void vscode.window.showInformationMessage(
+			t(restored ? 'usage.restore.done' : 'usage.restore.nothingHidden'),
+		);
+	}
+
+	private async afterHistoryChanged(): Promise<void> {
+		await this.refreshPreservingState();
+		await this.onHistoryChanged?.();
 	}
 
 	private renderShell(body: string): string {
@@ -443,32 +462,15 @@ export class UsageDashboard {
 		state: UsageDashboardState,
 		historyCutoffMs = 0,
 	): { html: string; selectedChatId: string | null; selectedTaskId: string | null } {
-		const nowMs = Date.now();
-		const periodDays =
-			state.period === 'all' || state.period === 'month'
-				? null
-				: Number.parseInt(state.period, 10);
-		let records =
-			state.period === 'month'
-				? filterThisMonth(allRecords, nowMs)
-				: filterByTime(allRecords, nowMs, periodDays);
-		if (state.projectId !== 'all') {
-			records = records.filter((record) => record.projectId === state.projectId);
-		}
-		if (state.modelId !== 'all') {
-			records = records.filter((record) => record.vscodeModelId === state.modelId);
-		}
-		const query = state.search.trim().toLowerCase();
-		if (query) {
-			records = records.filter((record) =>
-				(record.taskPreview ?? '').toLowerCase().includes(query),
-			);
-		}
-		const totals = aggregateRequests(records);
-		const visibleRecords =
-			historyCutoffMs > 0
-				? records.filter((record) => record.timestampMs > historyCutoffMs)
-				: records;
+		// Summary totals use the full retained ledger; chat/task/overhead
+		// detail only shows records after the Clear History cutoff.
+		const { accounting, visible: visibleRecords } = partitionDashboardRecords(
+			allRecords,
+			state,
+			Date.now(),
+			historyCutoffMs,
+		);
+		const totals = aggregateRequests(accounting);
 		const tasks = rollupTasks(
 			visibleRecords,
 			new Map(Object.entries(contexts.tasks).map(([id, task]) => [id, task.preview])),
@@ -506,7 +508,7 @@ export class UsageDashboard {
 			? visibleRecords
 					.filter((record) => record.taskId === selectedTask.taskId)
 					.sort((a, b) => a.timestampMs - b.timestampMs)
-				: [];
+			: [];
 		const overhead = rollupUnassignedOverhead(visibleRecords);
 		const effectiveChatId = selectedChat ? selectedChat.chatId : null;
 		const effectiveTaskId = selectedTask ? selectedTask.taskId : null;
@@ -549,7 +551,7 @@ export class UsageDashboard {
 			`<h2>${escapeHtml(t('usage.dashboard.title'))}</h2>`,
 			`<div class="toolbar">`,
 			`<label>${escapeHtml(t('usage.dashboard.period'))} <select id="period">`,
-			renderOptions(['1d', '7d', '30d', '90d', 'month', 'all'], state.period),
+			renderPeriodOptions(state.period),
 			`</select></label>`,
 			`<label>${escapeHtml(t('usage.dashboard.project'))} <select id="projectId">`,
 			`<option value="all">${escapeHtml(t('usage.dashboard.all'))}</option>`,
@@ -575,6 +577,7 @@ export class UsageDashboard {
 			`<button id="refresh" class="secondary">${escapeHtml(t('usage.dashboard.refresh'))}</button>`,
 			`<button id="exportCsv" class="secondary">${escapeHtml(t('usage.export.title'))}</button>`,
 			`<button id="clear" class="secondary">${escapeHtml(t('usage.clear.title'))}</button>`,
+			`<button id="restore" class="secondary">${escapeHtml(t('usage.restore.title'))}</button>`,
 			`</div>`,
 			`<div class="cards">`,
 			summaryCard(t('usage.dashboard.requests'), String(totals.requests)),
@@ -597,9 +600,7 @@ export class UsageDashboard {
 				? `<p class="note">${escapeHtml(t('usage.dashboard.emptyChats'))}</p>`
 				: [
 						'<div class="grid" role="list">',
-						...chats.map((chat) =>
-							chatCard(chat, selection.selectedChatId === chat.chatId),
-						),
+						...chats.map((chat) => chatCard(chat, selection.selectedChatId === chat.chatId)),
 						'</div>',
 					].join(''),
 			selectedChat
@@ -724,6 +725,7 @@ export class UsageDashboard {
 			'document.getElementById("refresh").addEventListener("click",()=>vscode.postMessage({command:"refresh"}));',
 			'document.getElementById("exportCsv").addEventListener("click",()=>vscode.postMessage({command:"exportCsv"}));',
 			'document.getElementById("clear").addEventListener("click",()=>vscode.postMessage({command:"clear"}));',
+			'document.getElementById("restore").addEventListener("click",()=>vscode.postMessage({command:"restore"}));',
 			'document.querySelectorAll("[data-task]").forEach(el=>{const select=()=>{const id=el.getAttribute("data-task");const chat=el.getAttribute("data-chat-context");if(window.__selectedChat&&chat&&window.__selectedChat!==chat){window.__selectedTask=null;vscode.postMessage(current({selectedChatId:window.__selectedChat,selectedTaskId:null}));return}window.__selectedTask=(window.__selectedTask===id?null:id);vscode.postMessage(current({selectedTaskId:window.__selectedTask}))};el.addEventListener("click",select);el.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();select()}})});',
 			'document.querySelectorAll("[data-chat]").forEach(el=>{const select=()=>{const id=el.getAttribute("data-chat");if(window.__selectedChat&&window.__selectedChat!==id){window.__selectedChat=id;window.__selectedTask=null}else{window.__selectedChat=(window.__selectedChat===id?null:id);if(!window.__selectedChat){window.__selectedTask=null}}vscode.postMessage(current({selectedChatId:window.__selectedChat,selectedTaskId:window.__selectedTask}))};el.addEventListener("click",select);el.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();select()}})});',
 			'document.querySelectorAll("[data-overhead]").forEach(el=>{const toggle=()=>{window.__overheadExpanded=!(window.__overheadExpanded===true);vscode.postMessage(current({overheadExpanded:window.__overheadExpanded}))};el.addEventListener("click",toggle);el.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();toggle()}})});',
@@ -740,14 +742,19 @@ export class UsageDashboard {
 			return;
 		}
 		if (this.refreshInFlight) {
+			// Never drop a refresh requested mid-render (e.g. Restore History
+			// while a poll is rendering); re-run once the current one finishes.
+			this.refreshQueued = true;
 			return;
 		}
 		this.refreshInFlight = true;
 		try {
+			// Signature first: a write landing during this render keeps the
+			// signature changed, so the next poll renders it.
+			this.lastSignature = await this.readSignature().catch(() => undefined);
 			const ledger = await this.store.readRequests();
 			const contexts = await this.store.readContexts();
 			const historyCutoffMs = await this.store.readHistoryCutoff();
-			this.lastSignature = await this.readSignature().catch(() => undefined);
 			this.lastRefreshMs = Date.now();
 			// DC-0001: live refreshes reuse the sanitized render result so a
 			// vanished chat/task collapses cleanly instead of showing stale detail.
@@ -770,6 +777,10 @@ export class UsageDashboard {
 			this.panel.webview.html = this.renderShell(t('usage.dashboard.loadFailed'));
 		} finally {
 			this.refreshInFlight = false;
+			if (this.refreshQueued) {
+				this.refreshQueued = false;
+				void this.refreshPreservingState();
+			}
 		}
 	}
 
@@ -869,21 +880,21 @@ export class UsageDashboard {
 }
 
 function toPeriod(value: unknown): UsagePeriod {
-	return value === '1d' || value === '7d' || value === '30d' || value === '90d' || value === 'month' || value === 'all' ? value : '30d';
+	return isUsagePeriod(value) ? value : '30d';
 }
 
-function renderOptions(options: string[], selected: string): string {
-	return options
-		.map((option) => {
-			const label =
-				option === 'month'
-					? t('usage.dashboard.thisMonth')
-					: option === '1d'
-						? '1D'
-						: option;
-			return `<option value="${option}"${option === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`;
-		})
-		.join('');
+function periodLabel(period: UsagePeriod): string {
+	if (period === 'month') {
+		return t('usage.dashboard.thisMonth');
+	}
+	return period === '1d' ? '1D' : period;
+}
+
+function renderPeriodOptions(selected: UsagePeriod): string {
+	return USAGE_PERIODS.map(
+		(period) =>
+			`<option value="${period}"${period === selected ? ' selected' : ''}>${escapeHtml(periodLabel(period))}</option>`,
+	).join('');
 }
 
 function summaryCard(label: string, value: string): string {

@@ -132,16 +132,19 @@ const zh: Translations = {
 	'usage.dashboard.localChatNote':
 		'本地会话 ID 由本扩展生成，用于归组任务；v1 无法深链到原生 Copilot 会话。',
 	'usage.dashboard.historyRetained':
-		'可见历史已清除到 {0}。用量账本仍保留，用于汇总和计费。',
+		'可见历史已清除到 {0}。用量账本仍保留，用于汇总和计费；点击"恢复历史"可重新显示。',
 	'usage.export.title': '导出 CSV',
 	'usage.export.empty': '没有可导出的用量记录。',
 	'usage.export.saveLabel': '导出用量 CSV',
 	'usage.export.done': '已导出 {0} 条用量记录。',
 	'usage.clear.title': '清除历史',
 	'usage.clear.confirm':
-		'清除可见的 Muse 会话历史？底层用量账本和计费数据会保留。',
+		'清除可见的 Muse 会话历史？底层用量账本和计费数据会保留，可随时通过"恢复历史"重新显示。',
 	'usage.clear.confirmYes': '清除可见历史',
 	'usage.clear.done': '可见历史已清除；用量账本已保留。',
+	'usage.restore.title': '恢复历史',
+	'usage.restore.done': '已恢复历史；所有保留的会话、任务和开销记录已重新显示。',
+	'usage.restore.nothingHidden': '没有被隐藏的用量历史，所有记录均已显示。',
 	'usage.status.empty': 'Muse：暂无用量',
 	'usage.status.emptyTooltip': '过去 30 天没有已跟踪的 Muse 用量。',
 	'usage.status.text': 'Muse {0} 请求 · {1} token · {2}',
@@ -387,16 +390,20 @@ const en: Translations = {
 	'usage.dashboard.localChatNote':
 		'Local Chat IDs are owned by this extension for grouping tasks. v1 cannot deep-link to the exact native Copilot chat.',
 	'usage.dashboard.historyRetained':
-		'Visible history was cleared through {0}. Usage accounting remains retained for rollups and billing.',
+		'Visible history was cleared through {0}. Usage accounting remains retained for rollups and billing; use Restore history to show it again.',
 	'usage.export.title': 'Export CSV',
 	'usage.export.empty': 'No usage records to export.',
 	'usage.export.saveLabel': 'Export usage CSV',
 	'usage.export.done': 'Exported {0} usage record(s).',
 	'usage.clear.title': 'Clear history',
 	'usage.clear.confirm':
-		'Clear visible Muse chat history? The underlying usage ledger and billing data will be retained.',
+		'Clear visible Muse chat history? The underlying usage ledger and billing data will be retained, and Restore history can show it again.',
 	'usage.clear.confirmYes': 'Clear visible history',
 	'usage.clear.done': 'Visible history cleared; usage accounting was retained.',
+	'usage.restore.title': 'Restore history',
+	'usage.restore.done':
+		'History restored; all retained chats, tasks, and overhead are visible again.',
+	'usage.restore.nothingHidden': 'No usage history is hidden; everything is already visible.',
 	'usage.status.empty': 'Muse: no usage yet',
 	'usage.status.emptyTooltip': 'No tracked Muse usage in the last 30 days.',
 	'usage.status.text': 'Muse {0} req · {1} tok · {2}',

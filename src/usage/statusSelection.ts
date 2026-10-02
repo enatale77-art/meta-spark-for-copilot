@@ -1,4 +1,4 @@
-import { filterByTime } from './aggregate';
+import { filterByTime, filterVisibleHistory } from './aggregate';
 import { deriveProjectId } from './context';
 import type { UsageRequestRecord } from './types';
 
@@ -21,16 +21,14 @@ export function selectStatusTask(input: {
 	workspaceUris: readonly string[];
 	nowMs: number;
 	windowDays?: number;
-	hiddenBeforeMs?: number;
+	/** Visible-history cutoff; records at or before it are not candidates. */
+	historyCutoffMs?: number;
 }): StatusSelection {
 	const projectId = deriveProjectId(input.workspaceUris).projectId;
-	const hiddenBeforeMs = Math.max(0, input.hiddenBeforeMs ?? 0);
-	const windowed = filterByTime(input.records, input.nowMs, input.windowDays ?? 30).filter(
-		(record) =>
-			record.status === 'completed' &&
-			record.projectId === projectId &&
-			record.timestampMs > hiddenBeforeMs,
-	);
+	const windowed = filterVisibleHistory(
+		filterByTime(input.records, input.nowMs, input.windowDays ?? 30),
+		input.historyCutoffMs ?? 0,
+	).filter((record) => record.status === 'completed' && record.projectId === projectId);
 	const sorted = [...windowed].sort((a, b) => b.timestampMs - a.timestampMs);
 	const latest = sorted[0];
 	const taskRecords =

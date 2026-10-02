@@ -45,9 +45,9 @@ export interface FileUsageStoreOptions {
  * appends (never read-modify-write), so runtime cost stays constant per
  * record and a failed read/open can never replace prior history.
  * `contexts.json` and `history-state.json` use atomic replacement.
- * Clear History only advances the UI visibility cutoff; it never deletes the
- * accounting ledger or context metadata. Global storage therefore survives
- * normal extension upgrades under the same extension identity.
+ * Clear/Restore History only rewrite the visible-history cutoff; they never
+ * delete or rewrite the accounting ledger or context metadata. Global storage
+ * survives normal extension upgrades under the same extension identity.
  * Only touches files under `<globalStorageUri>/usage-v1/`.
  */
 export function createFileUsageStore(
@@ -116,23 +116,9 @@ export function createFileUsageStore(
 			});
 		},
 		writeContexts(contexts: ContextsFile): Promise<void> {
-			return enqueue(async () => {
-				await node.mkdir(dir, { recursive: true });
-				const payload = serializeContexts(contexts);
-				const tempPath = join(dir, `${CONTEXTS_FILE_NAME}.${Date.now()}.${randomSuffix()}.tmp`);
-				await node.writeFile(tempPath, payload);
-				try {
-					await node.rename(tempPath, contextsPath);
-				} catch {
-					// Best-effort cleanup; the next write recreates the file.
-					await node.unlink(tempPath).catch(() => undefined);
-					throw new Error('[usage] Failed to replace contexts.json atomically');
-				}
-				// Remove stale temp files from crashed writes; never fail the write.
-				void cleanupStaleTempFiles(node, dir).catch((error) => {
-					logger.warn('[usage] Failed to clean stale contexts temp files', error);
-				});
-			});
+			return enqueue(() =>
+				replaceFileAtomically(node, dir, CONTEXTS_FILE_NAME, serializeContexts(contexts)),
+			);
 		},
 		readHistoryCutoff(): Promise<number> {
 			return enqueue(async () => {
@@ -146,21 +132,10 @@ export function createFileUsageStore(
 				}
 			});
 		},
-		clearHistory(hiddenBeforeMs: number): Promise<void> {
-			return enqueue(async () => {
-				await node.mkdir(dir, { recursive: true });
-				const tempPath = join(
-					dir,
-					`${HISTORY_STATE_FILE_NAME}.${Date.now()}.${randomSuffix()}.tmp`,
-				);
-				await node.writeFile(tempPath, serializeHistoryState(hiddenBeforeMs));
-				try {
-					await node.rename(tempPath, historyStatePath);
-				} catch {
-					await node.unlink(tempPath).catch(() => undefined);
-					throw new Error('[usage] Failed to replace history-state.json atomically');
-				}
-			});
+		writeHistoryCutoff(cutoffMs: number): Promise<void> {
+			return enqueue(() =>
+				replaceFileAtomically(node, dir, HISTORY_STATE_FILE_NAME, serializeHistoryState(cutoffMs)),
+			);
 		},
 		getChangeSignature(): Promise<
 			{ requestBytes: number; contextBytes: number; requestCount: number } | undefined
@@ -205,6 +180,39 @@ function randomSuffix(): string {
 	return createHash('sha256').update(`${Date.now()}:${Math.random()}`).digest('hex').slice(0, 8);
 }
 
+/** Files under usage-v1 that are replaced via temp file + rename. */
+const ATOMIC_FILE_NAMES = [CONTEXTS_FILE_NAME, HISTORY_STATE_FILE_NAME] as const;
+
+function tempFileName(fileName: string): string {
+	return `${fileName}.${Date.now()}.${randomSuffix()}.tmp`;
+}
+
+/**
+ * Temp-file + rename replacement so readers (including other VS Code
+ * windows) only ever observe the previous or the next complete file.
+ */
+async function replaceFileAtomically(
+	node: NonNullable<FileUsageStoreOptions['nodeFs']>,
+	dir: string,
+	fileName: string,
+	payload: string,
+): Promise<void> {
+	await node.mkdir(dir, { recursive: true });
+	const tempPath = join(dir, tempFileName(fileName));
+	await node.writeFile(tempPath, payload);
+	try {
+		await node.rename(tempPath, join(dir, fileName));
+	} catch {
+		// Best-effort cleanup; the previous file is still intact.
+		await node.unlink(tempPath).catch(() => undefined);
+		throw new Error(`[usage] Failed to replace ${fileName} atomically`);
+	}
+	// Remove stale temp files from crashed writes; never fail the write.
+	void cleanupStaleTempFiles(node, dir).catch((error) => {
+		logger.warn('[usage] Failed to clean stale usage temp files', error);
+	});
+}
+
 async function cleanupStaleTempFiles(
 	node: NonNullable<FileUsageStoreOptions['nodeFs']>,
 	dir: string,
@@ -216,10 +224,14 @@ async function cleanupStaleTempFiles(
 		return;
 	}
 	for (const entry of entries) {
-		if (entry.startsWith(`${CONTEXTS_FILE_NAME}.`) && entry.endsWith('.tmp')) {
+		if (isStaleTempFile(entry)) {
 			await node.unlink(join(dir, entry)).catch(() => undefined);
 		}
 	}
+}
+
+function isStaleTempFile(entry: string): boolean {
+	return entry.endsWith('.tmp') && ATOMIC_FILE_NAMES.some((name) => entry.startsWith(`${name}.`));
 }
 
 function defaultNodeFs(): NonNullable<FileUsageStoreOptions['nodeFs']> {
@@ -320,23 +332,9 @@ function createVscodeFsStore(globalStorageUri: vscode.Uri): UsageStore {
 			});
 		},
 		writeContexts(contexts: ContextsFile): Promise<void> {
-			return enqueue(async () => {
-				await vscode.workspace.fs.createDirectory(dir);
-				const payload = new TextEncoder().encode(serializeContexts(contexts));
-				const tempUri = vscode.Uri.joinPath(dir, `${CONTEXTS_FILE_NAME}.${Date.now()}.tmp`);
-				await vscode.workspace.fs.writeFile(tempUri, payload);
-				try {
-					await vscode.workspace.fs.rename(tempUri, contextsUri, { overwrite: true });
-				} catch {
-					// Fallback for FS providers without overwrite rename support.
-					try {
-						await vscode.workspace.fs.delete(contextsUri, { useTrash: false });
-					} catch {
-						// ignore missing target
-					}
-					await vscode.workspace.fs.rename(tempUri, contextsUri, { overwrite: true });
-				}
-			});
+			return enqueue(() =>
+				replaceUriAtomically(dir, CONTEXTS_FILE_NAME, serializeContexts(contexts)),
+			);
 		},
 		readHistoryCutoff(): Promise<number> {
 			return enqueue(async () => {
@@ -351,26 +349,10 @@ function createVscodeFsStore(globalStorageUri: vscode.Uri): UsageStore {
 				}
 			});
 		},
-		clearHistory(hiddenBeforeMs: number): Promise<void> {
-			return enqueue(async () => {
-				await vscode.workspace.fs.createDirectory(dir);
-				const payload = new TextEncoder().encode(serializeHistoryState(hiddenBeforeMs));
-				const tempUri = vscode.Uri.joinPath(
-					dir,
-					`${HISTORY_STATE_FILE_NAME}.${Date.now()}.tmp`,
-				);
-				await vscode.workspace.fs.writeFile(tempUri, payload);
-				try {
-					await vscode.workspace.fs.rename(tempUri, historyStateUri, { overwrite: true });
-				} catch {
-					try {
-						await vscode.workspace.fs.delete(historyStateUri, { useTrash: false });
-					} catch {
-						// ignore missing target
-					}
-					await vscode.workspace.fs.rename(tempUri, historyStateUri, { overwrite: true });
-				}
-			});
+		writeHistoryCutoff(cutoffMs: number): Promise<void> {
+			return enqueue(() =>
+				replaceUriAtomically(dir, HISTORY_STATE_FILE_NAME, serializeHistoryState(cutoffMs)),
+			);
 		},
 		getChangeSignature(): Promise<
 			{ requestBytes: number; contextBytes: number; requestCount: number } | undefined
@@ -392,6 +374,28 @@ function createVscodeFsStore(globalStorageUri: vscode.Uri): UsageStore {
 			});
 		},
 	};
+}
+
+async function replaceUriAtomically(
+	dir: vscode.Uri,
+	fileName: string,
+	payload: string,
+): Promise<void> {
+	await vscode.workspace.fs.createDirectory(dir);
+	const target = vscode.Uri.joinPath(dir, fileName);
+	const tempUri = vscode.Uri.joinPath(dir, tempFileName(fileName));
+	await vscode.workspace.fs.writeFile(tempUri, new TextEncoder().encode(payload));
+	try {
+		await vscode.workspace.fs.rename(tempUri, target, { overwrite: true });
+	} catch {
+		// Fallback for FS providers without overwrite rename support.
+		try {
+			await vscode.workspace.fs.delete(target, { useTrash: false });
+		} catch {
+			// ignore missing target
+		}
+		await vscode.workspace.fs.rename(tempUri, target, { overwrite: true });
+	}
 }
 
 async function statVscodeSignature(

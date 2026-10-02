@@ -3,7 +3,8 @@
  *
  * - `requests.jsonl` — append-only accounting ledger, schema-versioned per line.
  * - `contexts.json`  — versioned chat/task metadata, written atomically.
- * - `history-state.json` — UI visibility cutoff; never deletes accounting data.
+ * - `history-state.json` — visible-history cutoff only. Clear/Restore History
+ *   rewrite this file and nothing else; the ledger and contexts are retained.
  *
  * Pure helpers (parse/serialize/filter) live here for deterministic tests.
  * VS Code `FileSystem`-backed IO is isolated in `createFileUsageStore`;
@@ -106,6 +107,10 @@ export function serializeContexts(contexts: ContextsFile): string {
 
 export interface HistoryStateFile {
 	version: 1;
+	/**
+	 * Inclusive visible-history cutoff (epoch ms): records at or before it are
+	 * hidden from chat/task/overhead detail. 0 means nothing is hidden.
+	 */
 	hiddenBeforeMs: number;
 }
 
@@ -156,9 +161,41 @@ export interface UsageStore {
 	readRequests(): Promise<ParsedLedger>;
 	readContexts(): Promise<ContextsFile>;
 	writeContexts(contexts: ContextsFile): Promise<void>;
+	/** Visible-history cutoff in epoch ms; 0 when history was never cleared. */
 	readHistoryCutoff(): Promise<number>;
-	clearHistory(hiddenBeforeMs: number): Promise<void>;
+	/**
+	 * Atomically replace the visible-history cutoff. Only `history-state.json`
+	 * is written; accounting data is never touched. 0 shows all history.
+	 */
+	writeHistoryCutoff(cutoffMs: number): Promise<void>;
 	getChangeSignature?(): Promise<UsageChangeSignature | undefined>;
+}
+
+/**
+ * Clear History: advance the visible-history cutoff to `nowMs`. The cutoff
+ * never moves backwards (clock skew, a second window clearing earlier), so
+ * anything already hidden stays hidden until Restore History.
+ */
+export async function clearVisibleHistory(
+	store: UsageStore,
+	nowMs: number = Date.now(),
+): Promise<number> {
+	const cutoffMs = Math.max(await store.readHistoryCutoff(), nowMs);
+	await store.writeHistoryCutoff(cutoffMs);
+	return cutoffMs;
+}
+
+/**
+ * Restore History: reset the visible-history cutoff so every retained
+ * chat/task/overhead record is shown again. Idempotent — when nothing is
+ * hidden the marker is left untouched. Returns whether a cutoff was reset.
+ */
+export async function restoreVisibleHistory(store: UsageStore): Promise<boolean> {
+	if ((await store.readHistoryCutoff()) <= 0) {
+		return false;
+	}
+	await store.writeHistoryCutoff(0);
+	return true;
 }
 
 /** In-memory store for tests and deterministic verification. */
@@ -188,8 +225,8 @@ export function createMemoryUsageStore(): UsageStore & {
 		async readHistoryCutoff(): Promise<number> {
 			return historyCutoffMs;
 		},
-		async clearHistory(hiddenBeforeMs: number): Promise<void> {
-			historyCutoffMs = Math.max(0, hiddenBeforeMs);
+		async writeHistoryCutoff(cutoffMs: number): Promise<void> {
+			historyCutoffMs = Math.max(0, cutoffMs);
 			revision += 1;
 		},
 		async getChangeSignature(): Promise<UsageChangeSignature | undefined> {
@@ -205,8 +242,8 @@ export function createMemoryUsageStore(): UsageStore & {
 }
 
 /**
- * Scope guard: Clear History may only update the visibility marker. The
- * accounting ledger and context metadata are intentionally persistent.
+ * Scope guard: Clear/Restore History may only update the visibility marker.
+ * The accounting ledger and context metadata are intentionally persistent.
  */
 export function usageClearTargets(): readonly string[] {
 	return [`${USAGE_DIR_NAME}/${HISTORY_STATE_FILE_NAME}`];

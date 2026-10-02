@@ -17,11 +17,13 @@ let activeStatusBar: UsageStatusBar | undefined;
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
 	await initializeDiagnostics(context);
 	const store = createFileUsageStore(context.globalStorageUri);
-	activeDashboard = new UsageDashboard(context, store, () => {
+	// R11D: Clear/Restore History must refresh the status bar immediately so
+	// a hidden (or restored) latest task disappears (or reappears) at once.
+	activeDashboard = new UsageDashboard(context, store, () =>
 		activeStatusBar
 			?.refresh()
-			.catch((error) => logger.warn('[usage] Status refresh failed', error));
-	});
+			.catch((error) => logger.warn('[usage] Status refresh failed', error)),
+	);
 	const usageService = new UsageService({
 		store,
 		onRecorded: () => {
@@ -38,26 +40,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		},
 	});
 	activeStatusBar = new UsageStatusBar(store, () => activeDashboard?.open());
-	activeDashboard.setOnCleared(async () => {
-		try {
-			await usageService.clearAll();
-			// R11D: dashboard clear must refresh the status bar immediately
-			// (the initial constructor callback is replaced here, so refresh
-			// explicitly alongside the clear).
-			await activeStatusBar
-				?.refresh()
-				.catch((error) => logger.warn('[usage] Status refresh failed', error));
-		} catch (error) {
-			logger.warn('[usage] Dashboard clear failed', error);
-			throw error;
-		}
-	});
 	context.subscriptions.push(activeDashboard, activeStatusBar);
-	registerCommands(
-		context,
-		{ dashboard: activeDashboard, statusBar: activeStatusBar, store },
-		() => usageService,
-	);
+	registerCommands(context, { dashboard: activeDashboard, statusBar: activeStatusBar, store });
 	registerActionUrls(context);
 
 	try {
