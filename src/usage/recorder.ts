@@ -14,6 +14,7 @@ import {
 	type UsageMarkerParseResult,
 } from './context';
 import { findLatestUsageMarker, parseStatefulUsageMarkerPart } from './marker';
+import { findAgentHostUsageIdentity } from './agentHostContext';
 import { calculateCost, resolvePricing, splitUsageTokens } from './pricing';
 import type { UsageAllocation, UsageRequestRecord } from './types';
 import { emptyContexts, type ContextsFile } from './types';
@@ -83,13 +84,27 @@ export class UsageService {
 		const project = this.resolveProject();
 		const marker = safeFindMarker(input.messages);
 		const correlationMessages = toCorrelationMessages(input.messages);
-		const allocation = allocateUsageContext({
-			messages: correlationMessages,
-			requestKind: input.requestKind,
-			marker,
-			projectId: project.projectId,
-			projectName: project.projectName,
-		});
+		const nativeIdentity =
+			input.requestKind === 'main-agent' && !marker?.valid
+				? findAgentHostUsageIdentity(correlationMessages, project.projectId)
+				: undefined;
+		const contexts = nativeIdentity ? await this.loadContexts() : undefined;
+		const allocation: UsageAllocation = nativeIdentity
+			? {
+					...project,
+					...nativeIdentity,
+					isNewChat: !contexts?.chats[nativeIdentity.chatId],
+					isNewTask: !contexts?.tasks[nativeIdentity.taskId],
+					inherited: false,
+					unassigned: false,
+				}
+			: allocateUsageContext({
+					messages: correlationMessages,
+					requestKind: input.requestKind,
+					marker,
+					projectId: project.projectId,
+					projectName: project.projectName,
+				});
 		await this.ensureContextsForAllocation(allocation).catch((error) => {
 			logger.warn(
 				formatRequestLogLine(input.requestKind, 'Failed to update usage contexts'),
@@ -241,7 +256,7 @@ export class UsageService {
 				updatedAtMs: nowMs,
 				displayName: preview || `Local chat ${allocation.chatId.slice(0, 8)}`,
 				firstTaskPreview: preview || undefined,
-				nativeSessionId: null,
+				nativeSessionId: allocation.nativeSessionId ?? null,
 			};
 			changed = true;
 		} else if (allocation.chatId && contexts.chats[allocation.chatId]) {
@@ -271,7 +286,7 @@ export class UsageService {
 				updatedAt: nowIso,
 				updatedAtMs: nowMs,
 				preview: preview || `Task ${allocation.taskId.slice(0, 8)}`,
-				nativeSessionId: null,
+				nativeSessionId: allocation.nativeSessionId ?? null,
 			};
 			changed = true;
 		} else if (allocation.taskId && contexts.tasks[allocation.taskId]) {
@@ -400,6 +415,10 @@ function scanMessageMarker(
 }
 
 function toCorrelationRole(role: vscode.LanguageModelChatMessageRole): CorrelationMessage['role'] {
+	// The Agent Host's internal system role is 3 (not in the public enum).
+	if ((role as number) === 3) {
+		return 'system';
+	}
 	if (role === vscode.LanguageModelChatMessageRole.User) {
 		return 'user';
 	}

@@ -6,9 +6,11 @@
  *
  * Request shapes mirror real Agent Host provider-input dumps: a role-3 system prompt opening with
  * "You are an AI assistant using Copilot SDK in VS Code.", human turns wrapped as
- * `<current_datetime>…</current_datetime><system_reminder>…</system_reminder>text`, 379 tools,
- * `requestInitiator: 'core'`, and — once the host has a response id — a leading assistant message
- * holding only `stateful_marker` (`${modelId}\${responseId}`), exactly as the host builds it.
+ * `<current_datetime>…</current_datetime>` human turns, 380 tools, and `requestInitiator: 'core'`.
+ * The captured seven-call sequence replays full history WITHOUT any stateful marker. Separate
+ * compatibility cases retain the older 379-tool fixture and manufacture a leading pointer only
+ * to test the conditional renderer path IF the SDK sends previous_response_id. These cases do
+ * not prove that the live SDK echoes an emitted response ID.
  * No network beyond 127.0.0.1; no real API key.
  */
 const { describe, it, before, after } = require('node:test');
@@ -18,6 +20,7 @@ const Module = require('node:module');
 const os = require('node:os');
 const path = require('node:path');
 const fsp = require('node:fs/promises');
+const sevenCallFixture = require('./fixtures/agent-host-seven-calls.json');
 
 const lm = require('./vscode-lm-stub.cjs');
 
@@ -152,11 +155,11 @@ const token = { isCancellationRequested: false, onCancellationRequested: () => (
 
 // ---- Agent Host message builders --------------------------------------------------------------
 const system = (text = AGENT_HOST_SYSTEM) => ({ role: SYSTEM, content: [new Text(text)] });
-const human = (text) => ({
+const human = (text, timestamp = '2026-10-01T21:26:13.124-07:00') => ({
 	role: Role.User,
 	content: [
 		new Text(
-			`<current_datetime>2026-10-01T21:26:13.124-07:00</current_datetime>\n<system_reminder>\nReminder text.\n</system_reminder>\n${text}`,
+			`<current_datetime>${timestamp}</current_datetime>\n<system_reminder>\nReminder text.\n</system_reminder>\n${text}`,
 		),
 	],
 });
@@ -173,14 +176,59 @@ const skillContext = () => ({
 	role: Role.User,
 	content: [new Text('<skill-context name="example-skill">\nSkill instructions that are not a human turn.\n</skill-context>')],
 });
-/** What the host builds from `previous_response_id`: `${modelId}\${responseId}` as the first message. */
+/** Conditional renderer shape IF previous_response_id is supplied; absent in the live seven calls. */
 function hostPointer(marker) {
 	const decoded = new TextDecoder().decode(marker.data);
 	const responseId = decoded.slice(decoded.indexOf('\\') + 1);
 	return { role: Role.Assistant, content: [new Data(new TextEncoder().encode(`${MODEL_ID}\\${responseId}`), 'stateful_marker')] };
 }
 
-describe('Agent Host usage correlation: classifier -> real UsageService -> marker -> next turn', () => {
+function sessionContext(sessionFolder = sevenCallFixture.sessionFolder) {
+	return `<session_context>\nSession folder: ${sessionFolder}\n\nContents:\n[redacted session contents]\n</session_context>`;
+}
+
+function fixtureSystem(sessionFolder = sevenCallFixture.sessionFolder, { ambiguous = false } = {}) {
+	const context = sessionContext(sessionFolder);
+	return system(`${AGENT_HOST_SYSTEM}\n\n${context}${ambiguous ? `\n\n${sessionContext('c:/Users/REDACTED/.copilot/session-state/00000000-0000-4000-8000-000000000002')}` : ''}`);
+}
+
+/** Build VS Code messages from the redacted role/part notation in the live snapshot fixture. */
+function fixtureMessages(snapshot, { sessionFolder, humanPrompt, currentDatetime, ambiguousSession } = {}) {
+	const calls = new Map();
+	return snapshot.shape.split(';').map((messageShape, messageIndex) => {
+		const separator = messageShape.indexOf(':');
+		const roleKey = messageShape.slice(0, separator);
+		const descriptors = messageShape.slice(separator + 1).split(',').filter(Boolean);
+		const role = roleKey === 's' ? SYSTEM : roleKey === 'a' ? Role.Assistant : Role.User;
+		const content = descriptors.map((descriptor) => {
+			if (descriptor === 't') {
+				if (roleKey === 's') {
+					return new Text(fixtureSystem(sessionFolder, { ambiguous: ambiguousSession }).content[0].value);
+				}
+				if (roleKey === 'a') {
+					return new Text('Redacted assistant response.');
+				}
+				return new Text(
+					`<current_datetime>${currentDatetime ?? sevenCallFixture.currentDatetime}</current_datetime>\n<system_reminder>\nReminder text.\n</system_reminder>\n${humanPrompt ?? sevenCallFixture.humanText}`,
+				);
+			}
+			if (/^c\d+$/.test(descriptor)) {
+				const callId = `fixture-call-${descriptor.slice(1).padStart(2, '0')}`;
+				calls.set(descriptor, callId);
+				return new lm.LanguageModelToolCallPart(callId, 'fixture_tool', {});
+			}
+			if (/^r\d+$/.test(descriptor)) {
+				const callId = calls.get(`c${descriptor.slice(1)}`);
+				assert.ok(callId, `redacted result ${descriptor} refers to an earlier call`);
+				return new lm.LanguageModelToolResultPart(callId, [new Text('redacted fixture tool result')]);
+			}
+			throw new Error(`Unknown Agent Host fixture part ${descriptor} at message ${messageIndex}`);
+		});
+		return { role, content };
+	});
+}
+
+describe('Agent Host usage: full-history correlation and conditional marker compatibility', () => {
 	let provider;
 	let storage;
 	let store;
@@ -403,10 +451,10 @@ describe('Agent Host usage correlation: classifier -> real UsageService -> marke
 
 	describe('utility and background requests', () => {
 		const fixtures = [
-			['chat-title', 'You are an expert in crafting pithy titles for chatbot conversations.', undefined],
-			['todo-tracker', 'You are a background task tracker. Keep the todo list current.', [{ name: 'manage_todo_list', description: 'todo', inputSchema: { type: 'object' } }]],
-			['git-commit-message', 'You are an AI programming assistant, helping a software developer to come with the best git commit message.', undefined],
-			['background', 'You are an exploration sub-agent. Search the codebase and report back.', agentHostTools().slice(0, 40)],
+			['chat-title', `You are an expert in crafting pithy titles for chatbot conversations.\n\n${sessionContext()}`, undefined],
+			['todo-tracker', `You are a background task tracker. Keep the todo list current.\n\n${sessionContext()}`, [{ name: 'manage_todo_list', description: 'todo', inputSchema: { type: 'object' } }]],
+			['git-commit-message', `You are an AI programming assistant, helping a software developer to come with the best git commit message.\n\n${sessionContext()}`, undefined],
+			['background', `You are an exploration sub-agent. Search the codebase and report back.\n\n${sessionContext()}`, agentHostTools().slice(0, 40)],
 		];
 
 		it('stay non-main, create no chats or tasks, and emit no usage marker', async () => {
@@ -446,10 +494,162 @@ describe('Agent Host usage correlation: classifier -> real UsageService -> marke
 			assert.equal(mainRequests.length, 8);
 			assert.ok(mainRequests.every((record) => record.chatId === chain.chatId && record.taskId));
 			assert.equal(chats[0].requests, mainRequests.length);
-			assert.equal(overhead.requests, 4, 'only the four utility/background fixtures are overhead');
+			assert.equal(overhead.requests, 4, 'only utility/background fixtures are overhead');
 			assert.deepEqual(Object.keys(overhead.byKind).sort(), ['background', 'chat-title', 'git-commit-message', 'todo-tracker']);
 			assert.equal(overhead.byKind['main-agent'], undefined, 'no main-agent request is unassigned overhead');
 			assert.equal(aggregateRequests(accounting).requests, records.length, 'totals still include every request');
 		});
 	});
+	describe('live Agent Host full-history snapshots without a marker', () => {
+		const liveTools = [...agentHostTools(), {
+			name: 'fixture_agent_host_tool_380',
+			description: 'redacted Agent Host tool',
+			inputSchema: { type: 'object', properties: { value: { type: 'string' } } },
+		}];
+		const state = {};
+		const firstPrompt = sevenCallFixture.humanText;
+		const firstStamp = sevenCallFixture.currentDatetime;
+		const latestSnapshot = sevenCallFixture.snapshots.at(-1);
+
+		it('replays all seven increasing full histories into one chat and one task with no overhead', async () => {
+			assert.equal(liveTools.length, sevenCallFixture.toolCount);
+			assert.deepEqual(sevenCallFixture.snapshots.map((snapshot) => snapshot.messageCount), [2, 4, 8, 10, 12, 15, 20]);
+			const previousChats = new Set(Object.keys(store.getContexts().chats));
+			const previousTasks = new Set(Object.keys(store.getContexts().tasks));
+			const liveRecords = [];
+			for (const snapshot of sevenCallFixture.snapshots) {
+				const { record, marker } = await run(fixtureMessages(snapshot), liveTools);
+				assert.equal(record.requestKind, 'main-agent');
+				assert.equal(record.requestInitiator, 'core');
+				assert.equal(record.taskPreview, firstPrompt);
+				assert.match(record.chatId, UUID);
+				assert.match(record.taskId, UUID);
+				assert.equal(parseReplayMarkerData(marker.data).usageChatId, record.chatId);
+				assert.equal(parseReplayMarkerData(marker.data).usageTaskId, record.taskId);
+				liveRecords.push(record);
+				state.marker = marker;
+				assert.equal(fixtureMessages(snapshot).length, snapshot.messageCount);
+			}
+			assert.equal(new Set(liveRecords.map((record) => record.chatId)).size, 1);
+			assert.equal(new Set(liveRecords.map((record) => record.taskId)).size, 1);
+			assert.equal(liveRecords.length, 7);
+			assert.equal(new Set(Object.keys(store.getContexts().chats).filter((id) => !previousChats.has(id))).size, 1);
+			assert.equal(new Set(Object.keys(store.getContexts().tasks).filter((id) => !previousTasks.has(id))).size, 1);
+			assert.equal(rollupUnassignedOverhead(liveRecords).requests, 0, 'main-agent requests are fully assigned');
+			const contexts = store.getContexts();
+			const tasks = rollupTasks(liveRecords, new Map(Object.entries(contexts.tasks).map(([id, task]) => [id, task.preview])));
+			const chats = rollupChats(tasks, new Map(Object.entries(contexts.chats).map(([id, chat]) => [id, chat.displayName])));
+			assert.equal(chats.length, 1);
+			assert.equal(chats[0].taskCount, 1);
+			assert.equal(chats[0].requests, 7);
+			Object.assign(state, { chatId: liveRecords[0].chatId, taskId: liveRecords[0].taskId });
+		});
+
+		it('a later stamped human turn starts a new task and the next tool loop keeps it', async () => {
+			const nextStamp = '2026-10-01T22:53:11.013-07:00';
+			const nextHistory = [
+				...fixtureMessages(latestSnapshot),
+				{ role: Role.Assistant, content: [new Text('The requested work is complete.')] },
+				human('Please check the follow-up.', nextStamp),
+			];
+			const { record, reported } = await run(nextHistory, liveTools);
+			assert.equal(record.chatId, state.chatId);
+			assert.notEqual(record.taskId, state.taskId);
+			assert.equal(record.taskPreview, 'Please check the follow-up.');
+			const returnedCall = reported.find((part) => part instanceof lm.LanguageModelToolCallPart);
+			assert.ok(returnedCall, 'fake endpoint should return a tool call for the follow-up request');
+			const continuation = await run([
+				...nextHistory,
+				assistantToolCall(returnedCall.callId),
+				toolResult(returnedCall.callId),
+			], liveTools);
+			assert.equal(continuation.record.chatId, state.chatId);
+			assert.equal(continuation.record.taskId, record.taskId);
+			state.followupTaskId = record.taskId;
+		});
+
+		it('same prompt and stamp in a second session creates a separate chat', async () => {
+			const otherSession = 'c:/Users/REDACTED/.copilot/session-state/00000000-0000-4000-8000-000000000002';
+			const { record } = await run(fixtureMessages(latestSnapshot, {
+				sessionFolder: otherSession,
+				humanPrompt: firstPrompt,
+				currentDatetime: firstStamp,
+			}), liveTools);
+			assert.notEqual(record.chatId, state.chatId);
+			assert.notEqual(record.taskId, state.taskId);
+		});
+
+		it('a valid in-history marker keeps its existing chat and task ahead of a copied session folder', async () => {
+			const copiedSession = 'c:/Users/REDACTED/.copilot/session-state/00000000-0000-4000-8000-000000000002';
+			const fullHistory = fixtureMessages(latestSnapshot, { sessionFolder: copiedSession });
+			const { record } = await run([hostPointer(state.marker), ...fullHistory], liveTools);
+			assert.equal(record.chatId, state.chatId);
+			assert.equal(record.taskId, state.taskId);
+		});
+
+		it('missing or ambiguous system session blocks keep requests in the no-marker path', async () => {
+			const missing = async () => run([system(), human(firstPrompt, firstStamp)], liveTools);
+			const ambiguous = async () => run(fixtureMessages(sevenCallFixture.snapshots[0], { ambiguousSession: true }), liveTools);
+			const missingOne = await missing();
+			const missingTwo = await missing();
+			const ambiguousOne = await ambiguous();
+			const ambiguousTwo = await ambiguous();
+			for (const { record } of [missingOne, missingTwo, ambiguousOne, ambiguousTwo]) {
+				assert.match(record.chatId, UUID);
+				assert.match(record.taskId, UUID);
+			}
+			assert.notEqual(missingOne.record.chatId, missingTwo.record.chatId);
+			assert.notEqual(ambiguousOne.record.chatId, ambiguousTwo.record.chatId);
+			assert.notEqual(missingOne.record.chatId, ambiguousOne.record.chatId);
+		});
+
+		it('does not treat a session path in user text as an Agent Host session signal', async () => {
+			const pathOnlyPrompt = `Session folder: ${sevenCallFixture.sessionFolder}\n${firstPrompt}`;
+			const make = () => [system(), human(pathOnlyPrompt, firstStamp)];
+			const one = await run(make(), liveTools);
+			const two = await run(make(), liveTools);
+			assert.notEqual(one.record.chatId, two.record.chatId);
+			assert.notEqual(one.record.taskId, two.record.taskId);
+		});
+
+		it('falls back when the human turn has no canonical timestamp', async () => {
+			const make = () => [fixtureSystem(), { role: Role.User, content: [new Text(firstPrompt)] }];
+			const one = await run(make(), liveTools);
+			const two = await run(make(), liveTools);
+			assert.notEqual(one.record.chatId, two.record.chatId);
+			assert.notEqual(one.record.taskId, two.record.taskId);
+		});
+
+		it('the same stamped prompt repeated as a second human turn receives a distinct task', async () => {
+			const messages = [
+				...fixtureMessages(latestSnapshot),
+				{ role: Role.Assistant, content: [new Text('First response.')] },
+				human(firstPrompt, firstStamp),
+			];
+			const { record } = await run(messages, liveTools);
+			assert.equal(record.chatId, state.chatId);
+			assert.notEqual(record.taskId, state.taskId);
+			assert.notEqual(record.taskId, state.followupTaskId);
+		});
+
+		it('reloaded UsageService derives the same IDs from the same full history', async () => {
+			const originalService = service;
+			const reloadedService = new UsageService({
+				store,
+				onRecorded: (record) => recorded.push(record),
+				getWorkspaceUris: () => ['file:///d%3A/Development/Project'],
+				getWorkspaceName: () => 'Project',
+			});
+			provider.setUsageService(reloadedService);
+			try {
+				const { record } = await run(fixtureMessages(latestSnapshot), liveTools);
+				assert.equal(record.chatId, state.chatId);
+				assert.equal(record.taskId, state.taskId);
+			} finally {
+				provider.setUsageService(originalService);
+			}
+		});
+	});
+
+
 });
