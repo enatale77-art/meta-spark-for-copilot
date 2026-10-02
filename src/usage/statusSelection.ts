@@ -29,7 +29,7 @@ export function selectStatusTask(input: {
 		(record) =>
 			record.status === 'completed' &&
 			record.projectId === projectId &&
-			record.timestampMs >= hiddenBeforeMs,
+			record.timestampMs > hiddenBeforeMs,
 	);
 	const sorted = [...windowed].sort((a, b) => b.timestampMs - a.timestampMs);
 	const latest = sorted[0];
