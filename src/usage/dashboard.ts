@@ -446,7 +446,7 @@ export class UsageDashboard {
 			'<!DOCTYPE html><html><head><meta charset="utf-8">',
 			"<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'none'; connect-src 'none';\">",
 			'<meta name="viewport" content="width=device-width, initial-scale=1">',
-			'<style>body{font-family:var(--vscode-font-family);padding:16px;color:var(--vscode-foreground);background:var(--vscode-editor-background)}</style>',
+			'<style>body{font-family:var(--vscode-font-family);font-size:var(--vscode-font-size,13px);padding:20px 24px;color:var(--vscode-descriptionForeground);background:var(--vscode-editor-background)}</style>',
 			'</head><body>',
 			`<p>${escapeHtml(body)}</p>`,
 			'</body></html>',
@@ -518,42 +518,85 @@ export class UsageDashboard {
 			"<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'none'; connect-src 'none';\">",
 			'<meta name="viewport" content="width=device-width, initial-scale=1">',
 			'<style>',
-			'body{font-family:var(--vscode-font-family);padding:16px;color:var(--vscode-foreground);background:var(--vscode-editor-background);max-width:1100px;margin:0 auto;overflow-x:hidden}',
-			'.chat-summary{border-left:3px solid var(--vscode-focusBorder);padding:2px 0 2px 12px;margin:8px 0}',
-			'.chat-detail h4{margin:12px 0 4px}',
-			'.task-detail{border-style:dashed}',
-			'.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:12px 0}',
-			'.card{border:1px solid var(--vscode-panel-border);border-radius:8px;padding:10px 14px;min-width:0;background:var(--vscode-sideBar-background)}',
-			'.card .label{opacity:.75;font-size:12px}',
-			'.card .value{font-size:18px;font-weight:600;overflow-wrap:anywhere}',
-			'.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));gap:12px;margin:12px 0}',
-			'.tile{border:1px solid var(--vscode-panel-border);border-radius:10px;padding:12px 14px;cursor:pointer;background:var(--vscode-sideBar-background);min-width:0}',
-			'.tile:hover{border-color:var(--vscode-focusBorder)}',
-			'.tile:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:2px}',
-			'.tile[aria-expanded=true]{border-color:var(--vscode-focusBorder)}',
-			'.tile .title{font-weight:600;font-size:14px;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}',
-			'.tile .sub{opacity:.75;font-size:12px;margin-top:4px;overflow-wrap:anywhere}',
-			'.tile .metrics{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;font-size:12px}',
-			'.tile .cost{font-weight:600;margin-top:8px}',
-			'.detail{border:1px solid var(--vscode-panel-border);border-radius:10px;padding:12px 14px;margin:12px 0;min-width:0}',
+			// Theme-derived tokens; color-mix fallbacks keep borders visible in
+			// themes that leave panel/button borders transparent.
+			':root{--muted:var(--vscode-descriptionForeground);--border:var(--vscode-widget-border,color-mix(in srgb,var(--vscode-foreground) 16%,transparent));--surface:var(--vscode-sideBar-background,var(--vscode-editorWidget-background));--accent:var(--vscode-focusBorder)}',
+			'*{box-sizing:border-box}',
+			'body{font-family:var(--vscode-font-family);font-size:var(--vscode-font-size,13px);line-height:1.45;color:var(--vscode-foreground);background:var(--vscode-editor-background);max-width:1120px;margin:0 auto;padding:20px 24px 32px;overflow-x:hidden}',
+			// Form controls do not inherit fonts by default; without this they
+			// render in the platform UI font instead of the VS Code font.
+			'button,input,select{font-family:inherit;font-size:inherit;line-height:1.3}',
+			'h2{font-size:20px;font-weight:600;margin:0}',
+			'h3{font-size:14px;font-weight:600;margin:28px 0 10px;display:flex;align-items:center;gap:8px}',
+			'h4{font-size:13px;font-weight:600;margin:18px 0 8px;display:flex;align-items:center;gap:8px}',
+			'.count{font-size:11px;font-weight:600;line-height:18px;min-width:20px;padding:0 6px;border-radius:9px;text-align:center;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}',
+			'.caption{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}',
+			'.header{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-bottom:16px}',
+			'.actions{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}',
+			'.filters{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 12px;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}',
+			'.field{display:flex;flex-direction:column;gap:4px;min-width:0}',
+			'.field>span{font-size:11px;color:var(--muted)}',
+			'.field select{width:200px}',
+			'.field.narrow select{width:130px}',
+			'.field.grow{flex:1 1 200px}',
+			'.field.grow input{width:100%}',
+			'input,select{height:28px;padding:0 8px;max-width:100%;border-radius:4px;background:var(--vscode-input-background);color:var(--vscode-input-foreground);border:1px solid var(--vscode-input-border,var(--border))}',
+			'select{background:var(--vscode-dropdown-background,var(--vscode-input-background));color:var(--vscode-dropdown-foreground,var(--vscode-input-foreground));border-color:var(--vscode-dropdown-border,var(--border))}',
+			'input::placeholder{color:var(--vscode-input-placeholderForeground)}',
+			'input:focus,select:focus{outline:1px solid var(--accent);outline-offset:-1px}',
+			'button{height:28px;padding:0 12px;border-radius:4px;cursor:pointer;white-space:nowrap;border:1px solid var(--vscode-button-border,transparent);background:var(--vscode-button-background);color:var(--vscode-button-foreground)}',
+			'button:hover{background:var(--vscode-button-hoverBackground)}',
+			'button:focus-visible{outline:1px solid var(--accent);outline-offset:2px}',
+			'button.secondary{border-color:var(--border);background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}',
+			'button.secondary:hover{background:var(--vscode-button-secondaryHoverBackground,var(--vscode-list-hoverBackground))}',
+			'button.copy{height:22px;padding:0 8px;font-size:11px}',
+			'.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:16px 0}',
+			'.card{border:1px solid var(--border);border-radius:8px;padding:12px 14px;min-width:0;background:var(--surface)}',
+			'.card .value{font-size:20px;font-weight:600;margin-top:4px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}',
+			'.card .value small{font-size:13px;font-weight:400;color:var(--muted)}',
+			'.banner{margin:0 0 8px;padding:8px 12px;border-radius:4px;font-size:12px;border-left:3px solid var(--vscode-editorInfo-foreground,var(--accent));background:var(--vscode-textBlockQuote-background,var(--surface))}',
+			'.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr));gap:12px}',
+			'.tile{border:1px solid var(--border);border-radius:8px;padding:12px 14px;cursor:pointer;min-width:0;background:var(--surface)}',
+			'.tile:hover{border-color:var(--accent)}',
+			'.tile:focus-visible{outline:1px solid var(--accent);outline-offset:2px}',
+			'.tile[aria-expanded=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}',
+			'.tile .title{font-weight:600;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}',
+			'.tile .sub{font-size:12px;color:var(--muted);margin-top:2px;overflow-wrap:anywhere}',
+			'.tile .metrics{display:flex;flex-wrap:wrap;gap:2px 12px;margin-top:8px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}',
+			'.tile .cost{font-weight:600;margin-top:8px;font-variant-numeric:tabular-nums}',
+			'.detail{border:1px solid var(--border);border-radius:8px;padding:16px;margin:12px 0;min-width:0}',
+			'.chat-summary{border-left:3px solid var(--accent);padding-left:12px}',
+			'.chat-summary h3,.task-detail h4{margin:2px 0}',
+			'.stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px 16px;margin:14px 0}',
+			'.stat .k{font-size:11px;color:var(--muted)}',
+			'.stat .v{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}',
+			'.ids{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;font-size:12px;color:var(--muted);margin:8px 0}',
+			'code{font-family:var(--vscode-editor-font-family);font-size:12px;padding:1px 5px;border-radius:3px;overflow-wrap:anywhere;background:var(--vscode-textPreformat-background,var(--surface));color:var(--vscode-textPreformat-foreground,inherit)}',
 			'.detail-scroll{overflow-x:auto;max-width:100%}',
-			'table{border-collapse:collapse;width:100%;margin-top:12px}',
-			'th,td{border-bottom:1px solid var(--vscode-panel-border);padding:6px 8px;text-align:left;font-size:12px;vertical-align:top;overflow-wrap:anywhere}',
-			'.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}',
-			'.toolbar .spacer{flex:1 1 auto}',
-			'input,select{background:var(--vscode-input-background);color:var(--vscode-input-foreground);border:1px solid var(--vscode-input-border);border-radius:4px;padding:4px 8px;max-width:100%}',
-			'button{background:var(--vscode-button-background);color:var(--vscode-button-foreground);border:0;border-radius:4px;padding:5px 12px;cursor:pointer;min-height:28px}',
-			'button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}',
-			'.note{opacity:.8;font-size:12px;margin-top:12px}',
-			'code{font-size:11px;overflow-wrap:anywhere}',
-			'@media (max-width:520px){body{padding:12px}.cards{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}}',
+			'table{border-collapse:collapse;width:100%;margin-top:8px;font-variant-numeric:tabular-nums}',
+			'th,td{padding:6px 10px;border-bottom:1px solid var(--border);text-align:left;font-size:12px;white-space:nowrap}',
+			'th{font-weight:600;color:var(--muted)}',
+			'th.num,td.num{text-align:right}',
+			'tbody tr:hover{background:var(--vscode-list-hoverBackground)}',
+			'.note{font-size:12px;color:var(--muted);margin:8px 0}',
+			'.footnote{margin-top:28px}',
+			'.collapse{margin-top:14px}',
+			'@media (max-width:560px){body{padding:12px}.actions{margin-left:0}.field select{width:100%}.field{flex:1 1 140px}.cards{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}}',
 			'</style></head><body>',
+			`<div class="header">`,
 			`<h2>${escapeHtml(t('usage.dashboard.title'))}</h2>`,
-			`<div class="toolbar">`,
-			`<label>${escapeHtml(t('usage.dashboard.period'))} <select id="period">`,
+			`<div class="actions">`,
+			`<button id="refresh" class="secondary">${escapeHtml(t('usage.dashboard.refresh'))}</button>`,
+			`<button id="exportCsv" class="secondary">${escapeHtml(t('usage.export.title'))}</button>`,
+			`<button id="clear" class="secondary">${escapeHtml(t('usage.clear.title'))}</button>`,
+			`<button id="restore" class="secondary">${escapeHtml(t('usage.restore.title'))}</button>`,
+			`</div>`,
+			`</div>`,
+			`<div class="filters">`,
+			`<label class="field narrow"><span>${escapeHtml(t('usage.dashboard.period'))}</span><select id="period">`,
 			renderPeriodOptions(state.period),
 			`</select></label>`,
-			`<label>${escapeHtml(t('usage.dashboard.project'))} <select id="projectId">`,
+			`<label class="field"><span>${escapeHtml(t('usage.dashboard.project'))}</span><select id="projectId">`,
 			`<option value="all">${escapeHtml(t('usage.dashboard.all'))}</option>`,
 			projects
 				.map(
@@ -562,7 +605,7 @@ export class UsageDashboard {
 				)
 				.join(''),
 			`</select></label>`,
-			`<label>${escapeHtml(t('usage.dashboard.model'))} <select id="modelId">`,
+			`<label class="field"><span>${escapeHtml(t('usage.dashboard.model'))}</span><select id="modelId">`,
 			`<option value="all">${escapeHtml(t('usage.dashboard.all'))}</option>`,
 			models
 				.map(
@@ -571,31 +614,27 @@ export class UsageDashboard {
 				)
 				.join(''),
 			`</select></label>`,
-			`<label>${escapeHtml(t('usage.dashboard.search'))} <input id="search" value="${escapeHtml(state.search)}" placeholder="${escapeHtml(t('usage.dashboard.searchPlaceholder'))}"></label>`,
+			`<label class="field grow"><span>${escapeHtml(t('usage.dashboard.search'))}</span><input id="search" value="${escapeHtml(state.search)}" placeholder="${escapeHtml(t('usage.dashboard.searchPlaceholder'))}"></label>`,
 			`<button id="apply">${escapeHtml(t('usage.dashboard.apply'))}</button>`,
-			`<span class="spacer"></span>`,
-			`<button id="refresh" class="secondary">${escapeHtml(t('usage.dashboard.refresh'))}</button>`,
-			`<button id="exportCsv" class="secondary">${escapeHtml(t('usage.export.title'))}</button>`,
-			`<button id="clear" class="secondary">${escapeHtml(t('usage.clear.title'))}</button>`,
-			`<button id="restore" class="secondary">${escapeHtml(t('usage.restore.title'))}</button>`,
 			`</div>`,
 			`<div class="cards">`,
 			summaryCard(t('usage.dashboard.requests'), String(totals.requests)),
 			summaryCard(t('usage.dashboard.input'), formatCompact(totals.inputTokens)),
 			summaryCard(
 				`${t('usage.dashboard.cached')} / ${t('usage.dashboard.cacheHit')}`,
-				`${formatCompact(totals.cachedTokens)} · ${totals.cacheHitPct.toFixed(1)}%`,
+				formatCompact(totals.cachedTokens),
+				`${totals.cacheHitPct.toFixed(1)}%`,
 			),
 			summaryCard(t('usage.dashboard.output'), formatCompact(totals.outputTokens)),
 			summaryCard(t('usage.dashboard.cost'), formatCost(totals.estimatedCostUsd)),
 			`</div>`,
 			historyCutoffMs > 0
-				? `<p class="note">${escapeHtml(t('usage.dashboard.historyRetained', formatDateTime(historyCutoffMs)))}</p>`
+				? `<p class="banner">${escapeHtml(t('usage.dashboard.historyRetained', formatDateTime(historyCutoffMs)))}</p>`
 				: '',
 			// DC-0001 chat-first: the default dashboard shows one Local Chat
 			// card per chat (no separate top-level Tasks section). Task cards
 			// and request diagnostics render only inside the expanded chat.
-			`<h3>${escapeHtml(t('usage.dashboard.chats'))} (${chats.length})</h3>`,
+			`<h3>${escapeHtml(t('usage.dashboard.chats'))}${countBadge(chats.length)}</h3>`,
 			chats.length === 0
 				? `<p class="note">${escapeHtml(t('usage.dashboard.emptyChats'))}</p>`
 				: [
@@ -607,15 +646,28 @@ export class UsageDashboard {
 				? [
 						`<div class="detail chat-detail" id="chat-detail">`,
 						`<div class="chat-summary">`,
-						`<h3>${escapeHtml(t('usage.dashboard.localSubject'))}: ${escapeHtml(selectedChat.displayName)}</h3>`,
-						`<p class="note">${escapeHtml(selectedChat.projectName)}</p>`,
-						`<p class="note">${escapeHtml(t('usage.dashboard.tasks'))}: ${selectedChat.taskCount} · ${escapeHtml(t('usage.dashboard.requests'))}: ${selectedChat.requests}</p>`,
-						`<p class="note">${escapeHtml(t('usage.dashboard.input'))}: ${formatNumber(selectedChat.inputTokens)} · ${escapeHtml(t('usage.dashboard.cached'))}: ${formatNumber(selectedChat.cachedTokens)} (${selectedChat.cacheHitPct.toFixed(1)}%) · ${escapeHtml(t('usage.dashboard.uncached'))}: ${formatNumber(selectedChat.uncachedTokens)} · ${escapeHtml(t('usage.dashboard.output'))}: ${formatNumber(selectedChat.outputTokens)} · ${escapeHtml(t('usage.dashboard.reasoning'))}: ${formatNumber(selectedChat.reasoningTokens)}</p>`,
-						`<p class="note">${escapeHtml(t('usage.dashboard.cost'))}: ${formatCost(selectedChat.estimatedCostUsd)} · ${escapeHtml(t('usage.dashboard.start'))}: ${escapeHtml(formatDateTime(selectedChat.firstSeenMs))} · ${escapeHtml(t('usage.dashboard.lastActivity'))}: ${escapeHtml(formatDateTime(selectedChat.lastSeenMs))}</p>`,
+						`<div class="caption">${escapeHtml(t('usage.dashboard.localSubject'))}</div>`,
+						`<h3>${escapeHtml(selectedChat.displayName)}</h3>`,
+						`<div class="note">${escapeHtml(selectedChat.projectName)}</div>`,
 						`</div>`,
+						'<div class="stats">',
+						stat(t('usage.dashboard.tasks'), String(selectedChat.taskCount)),
+						stat(t('usage.dashboard.requests'), String(selectedChat.requests)),
+						stat(t('usage.dashboard.input'), formatNumber(selectedChat.inputTokens)),
+						stat(
+							t('usage.dashboard.cached'),
+							`${formatNumber(selectedChat.cachedTokens)} (${selectedChat.cacheHitPct.toFixed(1)}%)`,
+						),
+						stat(t('usage.dashboard.uncached'), formatNumber(selectedChat.uncachedTokens)),
+						stat(t('usage.dashboard.output'), formatNumber(selectedChat.outputTokens)),
+						stat(t('usage.dashboard.reasoning'), formatNumber(selectedChat.reasoningTokens)),
+						stat(t('usage.dashboard.cost'), formatCost(selectedChat.estimatedCostUsd)),
+						stat(t('usage.dashboard.start'), formatDateTime(selectedChat.firstSeenMs)),
+						stat(t('usage.dashboard.lastActivity'), formatDateTime(selectedChat.lastSeenMs)),
+						'</div>',
+						`<div class="ids">chat_id <code>${escapeHtml(selectedChat.chatId)}</code>${copyButton(selectedChat.chatId)}</div>`,
 						`<p class="note">${escapeHtml(t('usage.dashboard.localSubjectNote'))}</p>`,
-						`<p class="note">chat_id <code>${escapeHtml(selectedChat.chatId)}</code> <button data-copy="${escapeHtml(selectedChat.chatId)}">${escapeHtml(t('usage.dashboard.copy'))}</button></p>`,
-						`<h4>${escapeHtml(t('usage.dashboard.tasks'))} (${selectedChatTasks.length})</h4>`,
+						`<h4>${escapeHtml(t('usage.dashboard.tasks'))}${countBadge(selectedChatTasks.length)}</h4>`,
 						selectedChatTasks.length === 0
 							? `<p class="note">${escapeHtml(t('usage.dashboard.empty'))}</p>`
 							: [
@@ -628,87 +680,63 @@ export class UsageDashboard {
 						selectedTask
 							? [
 									`<div class="detail task-detail" id="task-detail">`,
-									`<h4>${escapeHtml(t('usage.dashboard.taskDetail'))}: ${escapeHtml(selectedTask.preview || selectedTask.taskId.slice(0, 8))}</h4>`,
-									`<p class="note">task_id <code>${escapeHtml(selectedTask.taskId)}</code> <button data-copy="${escapeHtml(selectedTask.taskId)}">${escapeHtml(t('usage.dashboard.copy'))}</button> · chat_id <code>${escapeHtml(selectedTask.chatId ?? '')}</code> <button data-copy="${escapeHtml(selectedTask.chatId ?? '')}">${escapeHtml(t('usage.dashboard.copy'))}</button></p>`,
-									`<p class="note">${escapeHtml(t('usage.dashboard.start'))}: ${escapeHtml(formatDateTime(selectedTask.firstSeenMs))} · ${escapeHtml(t('usage.dashboard.lastActivity'))}: ${escapeHtml(formatDateTime(selectedTask.lastSeenMs))}</p>`,
-									`<p class="note">${escapeHtml(t('usage.dashboard.input'))}: ${formatNumber(selectedTask.inputTokens)} · ${escapeHtml(t('usage.dashboard.cached'))}: ${formatNumber(selectedTask.cachedTokens)} · ${escapeHtml(t('usage.dashboard.output'))}: ${formatNumber(selectedTask.outputTokens)} · ${escapeHtml(t('usage.dashboard.reasoning'))}: ${formatNumber(selectedTask.reasoningTokens)}</p>`,
-									`<p class="note">${escapeHtml(t('usage.dashboard.kindBreakdown'))}</p>`,
-									'<div class="detail-scroll">',
-									'<table><thead><tr>',
-									`<th>${escapeHtml(t('usage.dashboard.kind'))}</th><th>${escapeHtml(t('usage.dashboard.requests'))}</th>`,
-									`<th>${escapeHtml(t('usage.dashboard.input'))}</th><th>${escapeHtml(t('usage.dashboard.cached'))}</th>`,
-									`<th>${escapeHtml(t('usage.dashboard.cacheHit'))}</th><th>${escapeHtml(t('usage.dashboard.output'))}</th>`,
-									`<th>${escapeHtml(t('usage.dashboard.reasoning'))}</th><th>${escapeHtml(t('usage.dashboard.cost'))}</th>`,
-									'</tr></thead><tbody>',
-									...Object.entries(selectedTask.byKind)
-										.sort((a, b) => b[1].requests - a[1].requests)
-										.map(
-											([kind, kindTotals]) =>
-												`<tr><td>${escapeHtml(kind)}</td><td>${kindTotals.requests}</td>` +
-												`<td>${formatNumber(kindTotals.inputTokens)}</td><td>${formatNumber(kindTotals.cachedTokens)}</td>` +
-												`<td>${kindTotals.cacheHitPct.toFixed(1)}%</td><td>${formatNumber(kindTotals.outputTokens)}</td>` +
-												`<td>${formatNumber(kindTotals.reasoningTokens)}</td><td>${formatCost(kindTotals.estimatedCostUsd)}</td></tr>`,
-										),
-									'</tbody></table>',
+									`<div class="caption">${escapeHtml(t('usage.dashboard.taskDetail'))}</div>`,
+									`<h4>${escapeHtml(selectedTask.preview || selectedTask.taskId.slice(0, 8))}</h4>`,
+									`<div class="ids">task_id <code>${escapeHtml(selectedTask.taskId)}</code>${copyButton(selectedTask.taskId)} · chat_id <code>${escapeHtml(selectedTask.chatId ?? '')}</code>${copyButton(selectedTask.chatId ?? '')}</div>`,
+									'<div class="stats">',
+									stat(t('usage.dashboard.start'), formatDateTime(selectedTask.firstSeenMs)),
+									stat(t('usage.dashboard.lastActivity'), formatDateTime(selectedTask.lastSeenMs)),
+									stat(t('usage.dashboard.input'), formatNumber(selectedTask.inputTokens)),
+									stat(t('usage.dashboard.cached'), formatNumber(selectedTask.cachedTokens)),
+									stat(t('usage.dashboard.output'), formatNumber(selectedTask.outputTokens)),
+									stat(t('usage.dashboard.reasoning'), formatNumber(selectedTask.reasoningTokens)),
 									'</div>',
+									`<h4>${escapeHtml(t('usage.dashboard.kindBreakdown'))}</h4>`,
+									kindBreakdownTable(selectedTask.byKind),
+									`<h4>${escapeHtml(t('usage.dashboard.requests'))}${countBadge(selectedRequests.length)}</h4>`,
 									'<div class="detail-scroll">',
 									'<table><thead><tr>',
 									`<th>${escapeHtml(t('usage.dashboard.time'))}</th><th>${escapeHtml(t('usage.dashboard.kind'))}</th>`,
-									`<th>${escapeHtml(t('usage.dashboard.input'))}</th><th>${escapeHtml(t('usage.dashboard.cached'))}</th>`,
-									`<th>${escapeHtml(t('usage.dashboard.output'))}</th><th>${escapeHtml(t('usage.dashboard.cost'))}</th>`,
+									`<th class="num">${escapeHtml(t('usage.dashboard.input'))}</th><th class="num">${escapeHtml(t('usage.dashboard.cached'))}</th>`,
+									`<th class="num">${escapeHtml(t('usage.dashboard.output'))}</th><th class="num">${escapeHtml(t('usage.dashboard.cost'))}</th>`,
 									'</tr></thead><tbody>',
 									...selectedRequests.map(
 										(record) =>
-											`<tr><td>${escapeHtml(record.timestamp)}</td><td>${escapeHtml(record.requestKind)}</td>` +
-											`<td>${formatNullable(record.promptTokens)}</td><td>${formatNullable(record.cachedInputTokens)}</td>` +
-											`<td>${formatNullable(record.completionTokens)}</td><td>${formatCost(record.estimatedCostUsd ?? 0)}</td></tr>`,
+											`<tr><td title="${escapeHtml(record.timestamp)}">${escapeHtml(formatDateTime(record.timestampMs))}</td><td>${escapeHtml(record.requestKind)}</td>` +
+											`<td class="num">${formatNullable(record.promptTokens)}</td><td class="num">${formatNullable(record.cachedInputTokens)}</td>` +
+											`<td class="num">${formatNullable(record.completionTokens)}</td><td class="num">${formatCost(record.estimatedCostUsd ?? 0)}</td></tr>`,
 									),
 									'</tbody></table>',
 									'</div>',
-									`<p><button class="secondary" data-collapse="task">${escapeHtml(t('usage.dashboard.collapse'))}</button></p>`,
+									`<div class="collapse"><button class="secondary" data-collapse="task">${escapeHtml(t('usage.dashboard.collapse'))}</button></div>`,
 									`</div>`,
 								].join('')
 							: '',
-						`<p><button class="secondary" data-collapse="chat">${escapeHtml(t('usage.dashboard.collapse'))}</button></p>`,
+						`<div class="collapse"><button class="secondary" data-collapse="chat">${escapeHtml(t('usage.dashboard.collapse'))}</button></div>`,
 						`</div>`,
 					].join('')
 				: '',
-			`<h3>${escapeHtml(t('usage.dashboard.overhead'))} (${overhead.requests})</h3>`,
+			`<h3>${escapeHtml(t('usage.dashboard.overhead'))}${countBadge(overhead.requests)}</h3>`,
 			[
+				'<div class="grid" role="list">',
 				`<div class="tile" role="listitem" tabindex="0" data-overhead="toggle" aria-expanded="${state.overheadExpanded ? 'true' : 'false'}" title="${escapeHtml(t('usage.dashboard.expand'))}">`,
 				`<div class="title">${escapeHtml(t('usage.dashboard.overhead'))}</div>`,
-				`<div class="sub">${overhead.requests} req · ${formatCompact(overhead.totalTokens)} tok</div>`,
+				`<div class="metrics"><span>${overhead.requests} req</span><span>${formatCompact(overhead.totalTokens)} tok</span></div>`,
 				`<div class="cost">${formatCost(overhead.estimatedCostUsd)}</div>`,
 				`</div>`,
+				'</div>',
 			].join(''),
 			state.overheadExpanded && overhead.requests > 0
 				? [
 						`<div class="detail" id="overhead-detail">`,
 						`<p class="note">${escapeHtml(t('usage.dashboard.overheadNote'))}</p>`,
-						'<div class="detail-scroll">',
-						'<table><thead><tr>',
-						`<th>${escapeHtml(t('usage.dashboard.kind'))}</th><th>${escapeHtml(t('usage.dashboard.requests'))}</th>`,
-						`<th>${escapeHtml(t('usage.dashboard.input'))}</th><th>${escapeHtml(t('usage.dashboard.cached'))}</th>`,
-						`<th>${escapeHtml(t('usage.dashboard.cacheHit'))}</th><th>${escapeHtml(t('usage.dashboard.output'))}</th>`,
-						`<th>${escapeHtml(t('usage.dashboard.reasoning'))}</th><th>${escapeHtml(t('usage.dashboard.cost'))}</th>`,
-						'</tr></thead><tbody>',
-						...Object.entries(overhead.byKind)
-							.sort((a, b) => b[1].requests - a[1].requests)
-							.map(
-								([kind, kindTotals]) =>
-									`<tr><td>${escapeHtml(kind)}</td><td>${kindTotals.requests}</td>` +
-									`<td>${formatNumber(kindTotals.inputTokens)}</td><td>${formatNumber(kindTotals.cachedTokens)}</td>` +
-									`<td>${kindTotals.cacheHitPct.toFixed(1)}%</td><td>${formatNumber(kindTotals.outputTokens)}</td>` +
-									`<td>${formatNumber(kindTotals.reasoningTokens)}</td><td>${formatCost(kindTotals.estimatedCostUsd)}</td></tr>`,
-							),
-						'</tbody></table>',
-						'</div>',
+						kindBreakdownTable(overhead.byKind),
 						`</div>`,
 					].join('')
 				: overhead.requests === 0
 					? `<p class="note">${escapeHtml(t('usage.dashboard.emptyOverhead'))}</p>`
 					: '',
-			`<p class="note">${escapeHtml(t('usage.dashboard.localChatNote'))}</p>`,
+			`<p class="note footnote">${escapeHtml(t('usage.dashboard.localChatNote'))}</p>`,
 			'<script>',
 			'const vscode = acquireVsCodeApi();',
 			// DC-R1: hydrate client-side selection from the effective
@@ -897,8 +925,63 @@ function renderPeriodOptions(selected: UsagePeriod): string {
 	).join('');
 }
 
-function summaryCard(label: string, value: string): string {
-	return `<div class="card"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}</div></div>`;
+function summaryCard(label: string, value: string, secondary?: string): string {
+	const extra = secondary ? ` <small>· ${escapeHtml(secondary)}</small>` : '';
+	return `<div class="card"><div class="caption">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}${extra}</div></div>`;
+}
+
+function countBadge(count: number): string {
+	return ` <span class="count">${count}</span>`;
+}
+
+function stat(label: string, value: string): string {
+	return `<div class="stat"><div class="k">${escapeHtml(label)}</div><div class="v">${escapeHtml(value)}</div></div>`;
+}
+
+function copyButton(value: string): string {
+	return `<button class="secondary copy" data-copy="${escapeHtml(value)}">${escapeHtml(t('usage.dashboard.copy'))}</button>`;
+}
+
+/** Per-request-kind totals table, shared by task detail and overhead. */
+function kindBreakdownTable(
+	byKind: Record<
+		string,
+		{
+			requests: number;
+			inputTokens: number;
+			cachedTokens: number;
+			cacheHitPct: number;
+			outputTokens: number;
+			reasoningTokens: number;
+			estimatedCostUsd: number;
+		}
+	>,
+): string {
+	const num = (label: string) => `<th class="num">${escapeHtml(t(label))}</th>`;
+	return [
+		'<div class="detail-scroll">',
+		'<table><thead><tr>',
+		`<th>${escapeHtml(t('usage.dashboard.kind'))}</th>`,
+		num('usage.dashboard.requests'),
+		num('usage.dashboard.input'),
+		num('usage.dashboard.cached'),
+		num('usage.dashboard.cacheHit'),
+		num('usage.dashboard.output'),
+		num('usage.dashboard.reasoning'),
+		num('usage.dashboard.cost'),
+		'</tr></thead><tbody>',
+		...Object.entries(byKind)
+			.sort((a, b) => b[1].requests - a[1].requests)
+			.map(
+				([kind, totals]) =>
+					`<tr><td>${escapeHtml(kind)}</td><td class="num">${totals.requests}</td>` +
+					`<td class="num">${formatNumber(totals.inputTokens)}</td><td class="num">${formatNumber(totals.cachedTokens)}</td>` +
+					`<td class="num">${totals.cacheHitPct.toFixed(1)}%</td><td class="num">${formatNumber(totals.outputTokens)}</td>` +
+					`<td class="num">${formatNumber(totals.reasoningTokens)}</td><td class="num">${formatCost(totals.estimatedCostUsd)}</td></tr>`,
+			),
+		'</tbody></table>',
+		'</div>',
+	].join('');
 }
 
 function taskCard(
@@ -952,8 +1035,7 @@ function chatCard(
 	return [
 		`<div class="tile" role="listitem" tabindex="0" data-chat="${escapeHtml(chat.chatId)}" aria-expanded="${expanded ? 'true' : 'false'}" title="${escapeHtml(t('usage.dashboard.expand'))}">`,
 		`<div class="title">${escapeHtml(chat.displayName)}</div>`,
-		`<div class="sub">${escapeHtml(chat.projectName)}</div>`,
-		`<div class="sub">${chat.taskCount} tasks · ${chat.requests} requests</div>`,
+		`<div class="sub">${escapeHtml(chat.projectName)} · ${chat.taskCount} tasks · ${chat.requests} requests</div>`,
 		`<div class="metrics"><span>${formatCompact(chat.inputTokens)} in</span><span>${chat.cacheHitPct.toFixed(1)}% cache</span><span>${formatCompact(chat.outputTokens)} out</span></div>`,
 		`<div class="cost">${formatCost(chat.estimatedCostUsd)}</div>`,
 		`</div>`,

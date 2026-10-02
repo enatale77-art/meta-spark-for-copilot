@@ -7,6 +7,7 @@
 - **Billing-aligned usage periods** — the Usage Dashboard period filter now offers 1D (rolling 24 hours), 7d, 30d, 90d, This month (local calendar month-to-date from local midnight on the 1st), and All
 - **Clear history is non-destructive** — it now only advances a visible-history cutoff stored in `usage-v1/history-state.json`. `requests.jsonl` and `contexts.json` are never deleted, and summary totals keep using the full retained ledger; older Local Chat/task/overhead detail and the status-bar task are hidden
 - **Restore history** — new dashboard button and `Meta Spark: Restore Usage History` command reset the cutoff so all retained history is visible again. Non-destructive and idempotent; open dashboards in other windows refresh through cross-window sync
+- **Dashboard polish** — buttons, selects, and inputs now use the VS Code UI font (previously the platform default); actions sit in the header, filters in a captioned bar, secondary buttons stay visible in themes with transparent button backgrounds, chat/task details use label/value grids, and numeric table columns are right-aligned
 
 ## 2.2.1
 

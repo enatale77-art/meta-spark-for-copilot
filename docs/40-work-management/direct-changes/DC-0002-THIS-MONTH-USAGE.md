@@ -58,6 +58,14 @@ The store exposes an explicit visibility API: `readHistoryCutoff()` / `writeHist
 - History-state writes share the atomic replace helper with `contexts.json`. Temp names include a random suffix on both FS backends, and stale `history-state.json.*.tmp` files are cleaned up.
 - Replaced source-text assertions with behavioral tests (`partitionDashboardRecords`, `filterByPeriod`, `filterVisibleHistory`, real-filesystem Clear/Restore).
 
+## Dashboard polish
+- Form controls inherit the VS Code UI font and size. Webview buttons, selects, and inputs otherwise fall back to the platform font, which caused the mismatched fonts.
+- The header row holds the title and actions (Refresh, Export CSV, Clear history, Restore history). Filters sit in a bar with captions above each control.
+- Secondary buttons get a theme-derived border so they stay visible in themes with transparent secondary button backgrounds. Copy buttons are compact outlined chips.
+- Summary cards use caption labels and tabular numerals. Section headings show count badges. The cleared-history notice is an info banner.
+- Chat and task details use label/value stat grids. Request-kind and request tables share one helper and right-align numeric columns. Request times use local time, with the ISO timestamp in the tooltip.
+- Element IDs, `data-*` hooks, hydration, and all i18n keys are unchanged. Verified by rendering the compiled dashboard against Dark Modern theme variables at full and narrow widths.
+
 ## Validation
 - `npm test` (TypeScript compile + `test/usage.test.cjs`): 64/64 pass.
 - `npm run lint` (oxlint): 0 warnings, 0 errors.
