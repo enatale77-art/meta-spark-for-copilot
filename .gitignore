@@ -8,3 +8,4 @@ node_modules/
 .env*
 !.env.example
 log.*
+Muse VS Code Extension.code-workspace
