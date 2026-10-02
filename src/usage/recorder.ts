@@ -64,12 +64,13 @@ export class UsageService {
 	}
 
 	/**
-	 * Delete all usage-monitor storage and drop the in-memory contexts cache
-	 * so a later request cannot write stale chat/task metadata back to disk.
-	 * Every clear path (dashboard + Command Palette) must go through here.
+	 * Clear visible chat/detail history without deleting accounting data.
+	 * The ledger and contexts remain in global storage for billing rollups and
+	 * survive normal extension upgrades. Every clear path must go through here.
 	 */
-	async clearAll(): Promise<void> {
-		await this.store.clear();
+	async clearAll(hiddenBeforeMs = Date.now()): Promise<void> {
+		await this.store.clearHistory(hiddenBeforeMs);
+		// Reload persisted contexts after the visibility boundary changes.
 		this.invalidateContextsCache();
 	}
 
