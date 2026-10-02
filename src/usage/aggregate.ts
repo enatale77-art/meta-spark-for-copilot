@@ -234,6 +234,16 @@ export function filterByTime(
 	return records.filter((record) => record.timestampMs >= cutoff);
 }
 
+/** Calendar month-to-date in the user's local timezone. */
+export function filterThisMonth(
+	records: readonly UsageRequestRecord[],
+	nowMs: number,
+): UsageRequestRecord[] {
+	const now = new Date(nowMs);
+	const startOfMonthMs = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+	return records.filter((record) => record.timestampMs >= startOfMonthMs);
+}
+
 /** Unassigned Copilot overhead: records with no task ID, grouped by kind. */
 export function rollupUnassignedOverhead(records: readonly UsageRequestRecord[]): OverheadRollup {
 	const scratch = emptyTotals();
