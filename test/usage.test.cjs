@@ -1652,3 +1652,39 @@ describe('cross-window sync signatures (R10)', () => {
 		);
 	});
 });
+
+describe('Agent Host previousResponseId pointer (leading marker)', () => {
+	const chatId = randomUUID();
+	const taskId = randomUUID();
+	const marker = { valid: true, chatId, taskId, version: 1, writer: 'meta-spark-for-copilot' };
+	const sys = { ...userText(''), role: 'other', isHumanUserText: false, partCount: 1 };
+	const assistant = () => ({ ...userText(''), role: 'assistant', isHumanUserText: false });
+	const skillContext = () => ({ ...userText('<skill-context name="x">…</skill-context>'), hasControlUpdate: true });
+	const allocate = (messages) =>
+		allocateUsageContext({ messages, requestKind: 'main-agent', marker, projectId: 'p', projectName: 'P' });
+
+	it('tool-loop continuation over the full history inherits the task', () => {
+		const result = allocate([markerHolder(chatId, taskId), sys, userText('Fix it'), assistant(), toolOnly()]);
+		assert.equal(result.taskId, taskId);
+		assert.equal(result.isNewTask, false);
+	});
+
+	it('delta input with only a tool result inherits the task', () => {
+		assert.equal(allocate([markerHolder(chatId, taskId), sys, toolOnly()]).taskId, taskId);
+	});
+
+	it('an injected skill-context message is not a new human turn', () => {
+		const result = allocate([markerHolder(chatId, taskId), sys, userText('Fix it'), assistant(), toolOnly(), skillContext()]);
+		assert.equal(result.taskId, taskId);
+	});
+
+	it('a human prompt after the last assistant message starts a new task in the same chat', () => {
+		const full = allocate([markerHolder(chatId, taskId), sys, userText('Fix it'), assistant(), toolOnly(), assistant(), userText('Now docs')]);
+		const delta = allocate([markerHolder(chatId, taskId), sys, userText('Now docs')]);
+		for (const result of [full, delta]) {
+			assert.equal(result.chatId, chatId);
+			assert.notEqual(result.taskId, taskId);
+			assert.equal(result.isNewTask, true);
+		}
+	});
+});
