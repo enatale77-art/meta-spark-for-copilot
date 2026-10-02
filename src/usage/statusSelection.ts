@@ -21,10 +21,15 @@ export function selectStatusTask(input: {
 	workspaceUris: readonly string[];
 	nowMs: number;
 	windowDays?: number;
+	hiddenBeforeMs?: number;
 }): StatusSelection {
 	const projectId = deriveProjectId(input.workspaceUris).projectId;
+	const hiddenBeforeMs = Math.max(0, input.hiddenBeforeMs ?? 0);
 	const windowed = filterByTime(input.records, input.nowMs, input.windowDays ?? 30).filter(
-		(record) => record.status === 'completed' && record.projectId === projectId,
+		(record) =>
+			record.status === 'completed' &&
+			record.projectId === projectId &&
+			record.timestampMs >= hiddenBeforeMs,
 	);
 	const sorted = [...windowed].sort((a, b) => b.timestampMs - a.timestampMs);
 	const latest = sorted[0];
