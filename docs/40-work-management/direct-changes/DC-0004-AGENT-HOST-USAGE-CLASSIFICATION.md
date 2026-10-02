@@ -6,9 +6,9 @@
 
 **Date:** 2026-10-01
 
-**Target version:** 2.2.3 (first candidate installed by the user; second candidate not packaged)
+**Target version:** 2.2.3 (first candidate installed by the user; second candidate packaged below, not installed)
 
-**Status:** REPAIRS AUTOMATED PASS — READY FOR SECOND 2.2.3 LIVE-TEST CANDIDATE; DO NOT MERGE OR PUBLISH
+**Status:** SECOND 2.2.3 LIVE-TEST CANDIDATE PACKAGED — AWAITING PRODUCT OWNER INSTALLATION; DO NOT MERGE OR PUBLISH
 
 The initial-candidate sections below are historical. The **2026-10-02 live regression investigation** at the end supersedes their assumed SDK marker round trip and records the two installed-candidate findings. Version remains 2.2.3.
 
@@ -188,4 +188,23 @@ Repair `src/i18n.ts` in English and Chinese: `Muse: no recent workspace usage`, 
 - Session-folder and human-timestamp fields are SDK prompt internals, not a documented VS Code provider contract. If a future SDK omits/changes them or compaction removes the latest human turn, marker-free correlation conservatively falls back to fresh allocation. It never merges solely by prompt, project, tool list or request proximity. Duplicate turn timestamps use an occurrence index; unusual compaction of duplicate-timestamp history can change that index.
 - Because the live record never retained response-wire marker bytes or acceptance acknowledgements, marker emission success is distinct from bridge/SDK echo. The new observed-shape path does not depend on that round trip. Conditional pointer tests do not assert otherwise.
 - Status stays workspace scoped. A global dashboard can show usage while the current workspace status is empty; the revised copy now says so.
-- PR #5 must remain open. No merge/publication, no version beyond 2.2.3, and no new VSIX in this work. Automated green results make the branch eligible for a second 2.2.3 live-test candidate, not release acceptance.
+- PR #5 must remain open. No merge/publication or version beyond 2.2.3. Automated validation alone did not establish installed live acceptance; the second candidate and its Product Owner installation gate are recorded below.
+
+## Second Live-Test Candidate — 2026-10-02
+
+Packaged only after refreshing `origin/main` and verifying `fix/agent-host-usage-classification` at `f97eeed72ce0e72a848f336193b6f6f9206a4c44`. At package time, current `main` was `08428315b1c4f7f06a269658f46954a12cb5dd4d`, also the merge base; the branch was four commits ahead with no main-only commits. The local and remote PR branch heads matched. The tracked worktree was clean; the unrelated local `.code-workspace` file remained untouched.
+
+Manifest evidence before packaging: `package.json`, root `package-lock.json` and `package-lock.json` package entry were all `2.2.3`. `npm.cmd test` (including compile) passed **133/133**, zero failures/skips. `npm.cmd run lint` passed with zero warnings/errors. The `.cmd` forms invoke the requested npm scripts; this PowerShell host blocks the `npm.ps1` shim.
+
+Fresh VSIX evidence:
+
+- Source HEAD: `f97eeed72ce0e72a848f336193b6f6f9206a4c44`
+- Filename: `meta-spark-for-copilot-2.2.3.vsix`
+- Path: `dist/meta-spark-for-copilot-2.2.3.vsix`
+- Size: **425,532 bytes**
+- SHA-256: `009D486113BAC26B0521E77E6A0483898A122F08FD6DF1421F6288FA55C27CA6`
+- Packaged file count: **85 VSIX archive entries**, matching the `vsce package` report.
+
+Opened and checked the produced archive; package `version` is `2.2.3`. Compiled content confirms Agent Host `<session_context>`/session-folder parsing, deterministic chat/task IDs and recorder fallback; the Agent Host classifier prefix; English and Chinese workspace-scoped status copy; Restore History; `1D` and `This month`; and the existing compiled tool-search virtualization module. `npm run package` completed successfully via `npm.cmd run package` and its normal prepublish compile.
+
+The first candidate's SHA-256 `D22C7FD4BD22FFE88736B68AD1A897EA8F35F0270748343B8AF4DAA0C616F2FF` is obsolete. The newly packaged bytes hash to the different SHA-256 above. No install was performed. The fresh VSIX is ready for Product Owner installation and live verification; PR #5 remains open and unmerged, and nothing was published.
