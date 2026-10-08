@@ -3,7 +3,7 @@
   "displayName": "Muse Spark 1.3 for Copilot Chat",
   "description": "Add Meta Muse Spark 1.3 (plus 1.2 and 1.1) as a model provider in GitHub Copilot Chat. 1M context window with native image, video, and PDF understanding. Standard and discounted Contributor tiers. Reasoning effort from minimal to max. Bring your own Meta API key.",
   "icon": "resources/icon.png",
-  "version": "2.2.3",
+  "version": "2.2.4",
   "publisher": "LukeSpine",
   "license": "MIT",
   "repository": {
@@ -141,6 +141,21 @@
           "default": "https://api.meta.ai/v1",
           "description": "%meta-spark.config.baseUrl.description%"
         },
+        "meta-spark-copilot.apiProtocol": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "responses",
+            "chatCompletions"
+          ],
+          "markdownEnumDescriptions": [
+            "%meta-spark.config.apiProtocol.auto.description%",
+            "%meta-spark.config.apiProtocol.responses.description%",
+            "%meta-spark.config.apiProtocol.chatCompletions.description%"
+          ],
+          "markdownDescription": "%meta-spark.config.apiProtocol.description%"
+        },
         "meta-spark-copilot.maxCompletionTokens": {
           "type": "number",
           "default": 0,
@@ -232,7 +247,7 @@
     "lint": "oxlint",
     "format": "oxfmt --write src/",
     "format:check": "oxfmt --check src/",
-    "test": "npm run compile && node --test test/usage.test.cjs test/tools.test.cjs test/provider-tools.integration.test.cjs test/agent-host-usage.integration.test.cjs",
+    "test": "npm run compile && node --test test/usage.test.cjs test/tools.test.cjs test/provider-tools.integration.test.cjs test/agent-host-usage.integration.test.cjs test/responses.test.cjs",
     "package": "vsce package --readme-path dist/README.marketplace.md -o dist/",
     "login": "vsce login LukeSpine"
   },

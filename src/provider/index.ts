@@ -4,13 +4,14 @@ import { getApiModelId, getDebugLoggingEnabled, getStabilizeToolListEnabled } fr
 import { MODELS } from '../consts';
 import { t } from '../i18n';
 import { logger } from '../logger';
-import type { MetaUsage } from '../types';
+import type { MetaReasoningItem, MetaUsage } from '../types';
 import type { UsageService, PendingUsageRequest } from '../usage';
 import { sumMetaUsage } from '../usage/pricing';
 import { getConfiguredThinkingEffort } from './models';
 import { createCacheDiagnosticsRecorder, dumpProviderInput } from './debug';
 import { toChatInfo } from './models';
 import { BalanceCurrencyResolver } from './pricing/currency';
+import { formatReasoningReplayLog, ReasoningReplayStore } from './reasoning';
 import { prepareChatRequest } from './request';
 import { findLatestLoadedTools } from './replay';
 import { classifyProviderRequest, formatRequestLogLine } from './routing';
@@ -39,12 +40,14 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 	private readonly cacheDiagnostics = createCacheDiagnosticsRecorder();
 	private readonly vision: ReturnType<typeof createVisionService>;
 	private readonly balanceCurrencyResolver: BalanceCurrencyResolver;
+	private readonly reasoningReplay: ReasoningReplayStore;
 	private charsPerToken = 4.0;
 
 	constructor(context: vscode.ExtensionContext) {
 		this.authManager = new AuthManager(context);
 		this.globalStorageUri = context.globalStorageUri;
 		this.vision = createVisionService(context);
+		this.reasoningReplay = ReasoningReplayStore.forStorageDir(context.globalStorageUri.fsPath);
 		this.balanceCurrencyResolver = new BalanceCurrencyResolver(context, this.authManager, () =>
 			this.onDidChangeLanguageModelChatInformationEmitter.fire(),
 		);
@@ -181,6 +184,7 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 
 		let prepared;
 		try {
+			await this.reasoningReplay.ready();
 			prepared = await prepareChatRequest({
 				authManager: this.authManager,
 				globalStorageUri: this.globalStorageUri,
@@ -193,6 +197,7 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 				cacheDiagnostics: this.cacheDiagnostics,
 				getVisionDescriber: () => this.vision.get(),
 				usageCorrelation: resolveUsageCorrelation(usagePending),
+				reasoningLookup: this.reasoningReplay.lookup,
 			});
 		} catch (error) {
 			await this.recordUsageAttempt(usagePending, error);
@@ -204,6 +209,8 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 			prepared.initialResponseNotice,
 		);
 		let seedReasoning = '';
+		const reasoningItems: MetaReasoningItem[] = [];
+		const emittedToolCallIds: string[] = [];
 		try {
 			for (;;) {
 				const outcome = await streamChatCompletion({
@@ -225,6 +232,8 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 						: undefined,
 					loadedToolNames: () => toolDiscovery.loadedToolNames(),
 				});
+				reasoningItems.push(...outcome.reasoningItems);
+				emittedToolCallIds.push(...outcome.emittedToolCallIds);
 				const followUp = toolDiscovery.finishRound({
 					...outcome,
 					isThinkingModel: prepared.isThinkingModel,
@@ -249,6 +258,9 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 			throw error;
 		}
 		usage.flush();
+		if (prepared.protocol === 'responses') {
+			this.recordReasoning(requestKind, prepared, emittedToolCallIds, reasoningItems, token);
+		}
 		if (usagePending && !usagePending.settled && !token.isCancellationRequested) {
 			// No authoritative usage arrived (should be rare since
 			// stream_options.include_usage=true); record a non-billable
@@ -265,6 +277,34 @@ export class MetaChatProvider implements vscode.LanguageModelChatProvider {
 		_token: vscode.CancellationToken,
 	): Promise<number> {
 		return estimateTokenCount(text, this.charsPerToken);
+	}
+
+	/**
+	 * Keys this response's encrypted reasoning by the tool calls the host received, so the next
+	 * request in the tool loop can replay it even when the host drops provider data parts.
+	 */
+	private recordReasoning(
+		requestKind: ReturnType<typeof classifyProviderRequest>,
+		prepared: { apiModelId: string; reasoningReplay?: Parameters<typeof formatReasoningReplayLog>[0] },
+		emittedToolCallIds: readonly string[],
+		reasoningItems: readonly MetaReasoningItem[],
+		token: vscode.CancellationToken,
+	): void {
+		const store = !token.isCancellationRequested && emittedToolCallIds.length > 0;
+		if (store) {
+			this.reasoningReplay.record(prepared.apiModelId, emittedToolCallIds, reasoningItems);
+		}
+		if (prepared.reasoningReplay) {
+			logger.info(
+				formatRequestLogLine(
+					requestKind,
+					formatReasoningReplayLog(prepared.reasoningReplay, {
+						items: store ? reasoningItems.length : 0,
+						calls: store ? emittedToolCallIds.length : 0,
+					}),
+				),
+			);
+		}
 	}
 
 	private async beginUsageTracking(input: {

@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.2.4
+
+### Fixes
+
+- **Agent loops repeating themselves ("I'll verify ... before ...") on long tool-calling tasks** — Meta's Chat Completions endpoint redacts Muse's reasoning and does not carry it between requests, so every step of a Copilot tool loop reasoned from scratch with only its one-line status messages as memory, and the model kept re-checking instead of acting. Requests to `api.meta.ai` now use the Responses API (`POST /responses`) with `store: false` and `include: ["reasoning.encrypted_content"]`, and each response's encrypted reasoning is replayed on the following steps. Works in both the classic Copilot agent and the Agent Host (Copilot SDK): reasoning is kept by the extension keyed by tool-call ID because the Agent Host drops provider data parts from history. Tool virtualization (>128 tools) is unchanged and its discovery rounds also keep their reasoning
+
+### Changes
+
+- New `meta-spark-copilot.apiProtocol` setting: `auto` (default; Responses API on the official endpoint, Chat Completions on a custom base URL), `responses`, or `chatCompletions`
+- Agent-mode requests now show Meta's short reasoning summary as thinking
+- Assistant text before a tool call is sent as `phase: "commentary"`; tool pairing that Meta would reject (orphan results, calls without results, call IDs over 64 characters) is repaired before sending
+- New `[reasoning-replay]` log line per Responses request (tool turns in history, turns replayed, items stored; no reasoning content)
+
 ## 2.2.3
 
 ### Fixes
