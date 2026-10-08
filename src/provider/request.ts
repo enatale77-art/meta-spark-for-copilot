@@ -1,14 +1,16 @@
 import vscode from 'vscode';
 import { AuthManager } from '../auth';
 import { MetaClient } from '../client';
-import { getApiModelId, getBaseUrl, getMaxCompletionTokens } from '../config';
+import { getApiModelId, getApiProtocol, getBaseUrl, getMaxCompletionTokens } from '../config';
 import { MODELS } from '../consts';
 import { isOfficialMetaBaseUrl } from '../endpoint';
 import { t } from '../i18n';
-import type { MetaMessage, MetaRequest } from '../types';
+import type { ResponsesRequestOptions } from '../client/responses';
+import type { MetaApiProtocol, MetaMessage, MetaRequest } from '../types';
 import { convertMessages, countMessageChars } from './convert';
 import { dumpMetaRequest, type CacheDiagnosticsRecorder, type CacheDiagnosticsRun } from './debug';
 import { getConfiguredThinkingEffort, type ModelConfigurationOptions } from './models';
+import { attachReplayedReasoning, type ReasoningLookup, type ReasoningReplayStats } from './reasoning';
 import type { ReplayMarkerMetadata } from './replay';
 import { classifyMetaRequest, shouldForceMinimalThinking, type RequestKind } from './routing';
 import type { ConversationSegment } from './segment';
@@ -17,7 +19,12 @@ import { resolveImageMessages, type VisionDescriber } from './vision';
 
 export interface PreparedChatRequest {
 	client: MetaClient;
+	protocol: MetaApiProtocol;
+	apiModelId: string;
 	request: MetaRequest;
+	responsesOptions?: ResponsesRequestOptions;
+	/** Responses API only: how much stored reasoning was re-attached to the history. */
+	reasoningReplay?: ReasoningReplayStats;
 	isThinkingModel: boolean;
 	totalRequestChars: number;
 	trailingToolResultIds: string[];
@@ -49,6 +56,8 @@ export interface PrepareChatRequestOptions {
 	cacheDiagnostics: CacheDiagnosticsRecorder;
 	getVisionDescriber: () => Promise<VisionDescriber | undefined>;
 	usageCorrelation?: { chatId: string; taskId: string };
+	/** Stored encrypted reasoning, re-attached to assistant tool-call turns (Responses API). */
+	reasoningLookup?: ReasoningLookup;
 }
 
 export async function prepareChatRequest({
@@ -63,6 +72,7 @@ export async function prepareChatRequest({
 	cacheDiagnostics,
 	getVisionDescriber,
 	usageCorrelation,
+	reasoningLookup,
 }: PrepareChatRequestOptions): Promise<PreparedChatRequest> {
 	const apiKey = await authManager.getApiKey();
 	if (!apiKey) {
@@ -70,7 +80,9 @@ export async function prepareChatRequest({
 	}
 
 	const baseUrl = getBaseUrl();
-	const client = new MetaClient(baseUrl, apiKey);
+	const protocol = getApiProtocol(baseUrl);
+	const client = new MetaClient(baseUrl, apiKey, protocol);
+	const apiModelId = getApiModelId(modelInfo.id);
 	const modelDef = MODELS.find((m) => m.id === modelInfo.id);
 	const isThinkingModel = modelDef?.capabilities.thinking ?? false;
 	const maxTokens = getMaxCompletionTokens();
@@ -78,11 +90,15 @@ export async function prepareChatRequest({
 	const visionResolution = await resolveImageMessages(messages, token, getVisionDescriber);
 	const resolvedMessages = visionResolution.messages;
 	const metaMessages = convertMessages(resolvedMessages, isThinkingModel);
+	const reasoningReplay =
+		protocol === 'responses' && reasoningLookup
+			? attachReplayedReasoning(metaMessages, (callIds) => reasoningLookup(apiModelId, callIds))
+			: undefined;
 	const tools = prepareRequestTools(modelDef?.capabilities.toolCalling, plannedTools);
 
 	const totalRequestChars = countMessageChars(metaMessages);
 	const baseRequest: MetaRequest = {
-		model: getApiModelId(modelInfo.id),
+		model: apiModelId,
 		messages: metaMessages,
 		stream: true,
 		tools,
@@ -146,9 +162,16 @@ export async function prepareChatRequest({
 			visionStats: visionResolution.stats,
 		});
 
+	const responsesOptions: ResponsesRequestOptions | undefined =
+		protocol === 'responses' ? { reasoningSummary: requestKind === 'main-agent' } : undefined;
+
 	const toPrepared = (nextRequest: MetaRequest, chars: number): PreparedChatRequest => ({
 		client,
+		protocol,
+		apiModelId,
 		request: nextRequest,
+		responsesOptions,
+		reasoningReplay,
 		isThinkingModel,
 		totalRequestChars: chars,
 		trailingToolResultIds: collectTrailingToolResultIds(nextRequest.messages),

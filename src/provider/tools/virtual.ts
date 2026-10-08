@@ -1,5 +1,5 @@
 import vscode from 'vscode';
-import type { MetaMessage, MetaToolCall } from '../../types';
+import type { MetaMessage, MetaReasoningItem, MetaToolCall } from '../../types';
 import {
 	ACTIVATE_TOOL_PREFIX,
 	MAX_TOOL_DISCOVERY_ROUNDS,
@@ -336,6 +336,8 @@ export interface ToolDiscoveryRoundSummary {
 	content: string;
 	reasoning: string;
 	isThinkingModel: boolean;
+	/** Responses API: replayed with the internal loader turn so the next round keeps its reasoning. */
+	reasoningItems?: readonly MetaReasoningItem[];
 }
 
 export interface ToolDiscoveryDiagnostics {
@@ -445,6 +447,9 @@ export class ToolDiscoverySession {
 		};
 		if (summary.isThinkingModel) {
 			assistant.reasoning_content = summary.reasoning;
+		}
+		if (summary.reasoningItems?.length) {
+			assistant.reasoning_items = [...summary.reasoningItems];
 		}
 		return [
 			assistant,

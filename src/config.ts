@@ -1,11 +1,31 @@
 import vscode from 'vscode';
 import { CONFIG_SECTION } from './consts';
+import { isOfficialMetaBaseUrl } from './endpoint';
+import type { MetaApiProtocol } from './types';
 
 export type DebugMode = 'minimal' | 'metadata' | 'verbose';
+export type ApiProtocolSetting = 'auto' | 'responses' | 'chatCompletions';
 
 export function getBaseUrl(): string {
 	const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
 	return config.get<string>('baseUrl') || 'https://api.meta.ai/v1';
+}
+
+/**
+ * `auto` uses the Responses API on the official Meta endpoint (the only Meta endpoint that keeps
+ * reasoning across tool calls) and Chat Completions on custom base URLs, which may be proxies that
+ * only implement `/chat/completions`.
+ */
+export function getApiProtocol(baseUrl: string): MetaApiProtocol {
+	const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
+	const setting = config.get<ApiProtocolSetting>('apiProtocol', 'auto');
+	if (setting === 'responses') {
+		return 'responses';
+	}
+	if (setting === 'chatCompletions') {
+		return 'chat-completions';
+	}
+	return isOfficialMetaBaseUrl(baseUrl) ? 'responses' : 'chat-completions';
 }
 
 export function getApiModelId(vscodeModelId: string): string {

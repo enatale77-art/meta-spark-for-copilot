@@ -1,7 +1,7 @@
 import vscode from 'vscode';
 import { createUserFacingError } from '../client';
 import { logger } from '../logger';
-import type { MetaToolCall, MetaUsage } from '../types';
+import type { MetaReasoningItem, MetaToolCall, MetaUsage } from '../types';
 import {
 	observeCancellationToken,
 	type CacheDiagnosticsRun,
@@ -20,6 +20,7 @@ interface ResponseStreamState {
 	roundReasoning: string;
 	roundContent: string;
 	emittedToolCallIds: string[];
+	reasoningItems: MetaReasoningItem[];
 	initialResponseNoticeReported: boolean;
 	replayMarkerReported: boolean;
 	loadedToolNames?: () => readonly string[] | undefined;
@@ -29,6 +30,10 @@ export interface StreamRoundOutcome {
 	content: string;
 	reasoning: string;
 	emittedToolCalls: number;
+	/** Host-visible tool call IDs of this round. */
+	emittedToolCallIds: string[];
+	/** Responses API encrypted reasoning produced in this round. */
+	reasoningItems: MetaReasoningItem[];
 }
 
 const COPILOT_USAGE_DATA_PART_MIME = 'usage';
@@ -70,6 +75,7 @@ export function streamChatCompletion({
 		roundReasoning: '',
 		roundContent: '',
 		emittedToolCallIds: [],
+		reasoningItems: [],
 		initialResponseNoticeReported: false,
 		replayMarkerReported: false,
 		loadedToolNames,
@@ -123,6 +129,10 @@ export function streamChatCompletion({
 					);
 				},
 
+				onReasoningItem: (item) => {
+					state.reasoningItems.push(item);
+				},
+
 				onUsage: (usage) => {
 					const charsPerToken = updateCharsPerToken(
 						prepared.totalRequestChars,
@@ -143,6 +153,7 @@ export function streamChatCompletion({
 				},
 			},
 			token,
+			prepared.responsesOptions,
 		)
 		.then(undefined, (error) => {
 			reportSkippedReplayMarkerIfNeeded(
@@ -161,6 +172,8 @@ export function streamChatCompletion({
 				content: state.roundContent,
 				reasoning: state.roundReasoning,
 				emittedToolCalls: state.emittedToolCallIds.length,
+				emittedToolCallIds: [...state.emittedToolCallIds],
+				reasoningItems: state.reasoningItems,
 			};
 		})
 		.finally(() => {

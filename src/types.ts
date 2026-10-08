@@ -20,7 +20,20 @@ export interface MetaMessage {
 	tool_call_id?: string;
 	tool_calls?: MetaToolCall[];
 	reasoning_content?: string;
+	/** Encrypted Responses API reasoning to replay before this assistant turn. Ignored by Chat Completions. */
+	reasoning_items?: MetaReasoningItem[];
 }
+
+/** Responses API `reasoning` item. Opaque: replayed whole, never edited. */
+export interface MetaReasoningItem {
+	type: 'reasoning';
+	id?: string;
+	summary: Array<{ type: 'summary_text'; text: string }>;
+	encrypted_content: string;
+}
+
+/** Wire protocol used to reach Meta. */
+export type MetaApiProtocol = 'responses' | 'chat-completions';
 
 export interface MetaToolCall {
 	id: string;
@@ -107,6 +120,8 @@ export interface StreamCallbacks {
 	onError: (error: Error) => void;
 	onDone: () => void;
 	onUsage?: (usage: MetaUsage) => void;
+	/** Responses API only: a completed reasoning item carrying `encrypted_content`. */
+	onReasoningItem?: (item: MetaReasoningItem) => void;
 }
 
 export type PricingCurrency = 'USD';
