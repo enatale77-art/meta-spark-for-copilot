@@ -6,9 +6,9 @@
 
 **Date:** 2026-10-08
 
-**Target version:** next release (no version bump yet; no candidate packaged)
+**Target version:** 2.2.4 (test candidate packaged below, not installed)
 
-**Status:** IMPLEMENTED — automated validation passed; Product Owner live verification pending.
+**Status:** TEST CANDIDATE — automated validation passed; PR #6 open; Product Owner live verification pending.
 
 ## Symptom
 
@@ -78,3 +78,16 @@ Not done here: needs a real Meta API key and an installed build.
 - Reasoning is replayed only where the store has it: chats from before this change, another machine, or history rewritten by Copilot compaction run without it (the old behavior, never worse).
 - The retry-without-replay heuristic matches `reasoning|encrypted` in a 400 body. A structure error that happens to mention reasoning would be retried once without replay and would then fail normally.
 - Custom base URLs stay on Chat Completions under `auto`; proxies that implement `/responses` need `apiProtocol: responses`.
+
+## Test Candidate Packaging — 2026-10-08
+
+Local live-test candidate only. PR #6 is not merged; nothing is installed or published to Marketplace/Open VSX.
+
+- Version `2.2.4` in `package.json` and both root version fields of `package-lock.json`; no dependency versions changed. `CHANGELOG.md` `Unreleased` section renamed to `2.2.4`.
+- Source commit packaged: `4ebef032b7cc14b4b4ec39165949fcf57de2d986` (`chore(release): bump to 2.2.4 test candidate`), clean tracked working tree.
+- `npm test`: 151 / 151 pass. `npm run lint`: 0 warnings, 0 errors. Run via `npm.cmd` because this PowerShell host blocks the `npm.ps1` shim.
+- `npm run package`: `dist/meta-spark-for-copilot-2.2.4.vsix`, 89 files, **436,718 bytes**.
+- VSIX SHA-256: `18A6419D6E273E72231DD52AB5A67F4E3CB084B3FBBA1D3893A1ED67E1659EA0`
+- Verified inside the VSIX: `package.json` version 2.2.4; `apiProtocol` setting with English and Chinese strings; `out/client/responses.js` (`store: false`, `reasoning.encrypted_content`); `out/provider/reasoning/store.js` (summaries stripped before storage); changelog top section `2.2.4`; no `src/`, `test/`, `.ts`, or source-map files.
+- `dist/` is gitignored, so the VSIX is not committed.
+- Live verification checklist: see "Live verification (required before release)" above.
