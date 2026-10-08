@@ -8,7 +8,7 @@
 
 **Target version:** 2.2.4 (test candidate packaged below, not installed)
 
-**Status:** TEST CANDIDATE — automated validation passed; PR #6 open; Product Owner live verification pending.
+**Status:** COMPLETE / ACCEPTED — Product Owner live verification passed on the installed 2.2.4 test candidate (2026-10-08); merged via PR #6.
 
 ## Symptom
 
@@ -91,3 +91,13 @@ Local live-test candidate only. PR #6 is not merged; nothing is installed or pub
 - Verified inside the VSIX: `package.json` version 2.2.4; `apiProtocol` setting with English and Chinese strings; `out/client/responses.js` (`store: false`, `reasoning.encrypted_content`); `out/provider/reasoning/store.js` (summaries stripped before storage); changelog top section `2.2.4`; no `src/`, `test/`, `.ts`, or source-map files.
 - `dist/` is gitignored, so the VSIX is not committed.
 - Live verification checklist: see "Live verification (required before release)" above.
+
+## Final Live Verification — ACCEPTED 2026-10-08
+
+**Installed candidate:** 2.2.4 test candidate (`dist/meta-spark-for-copilot-2.2.4.vsix`, SHA-256 `18A6419D6E273E72231DD52AB5A67F4E3CB084B3FBBA1D3893A1ED67E1659EA0`, packaged from `4ebef032b7cc14b4b4ec39165949fcf57de2d986`).
+
+**Acceptance:** The Product Owner installed the candidate, tested it live, reported that it appears to be working, and approved the merge of PR #6. No blocking issue was reported.
+
+The report was an overall result. Individual checklist items above were not reported separately, and no live log excerpts were captured in this record.
+
+**Residual risks (non-blocking):** the risks listed above still apply. Reasoning is replayed only where the local store holds it. Custom base URLs stay on Chat Completions under `auto`. The retry-without-replay heuristic is text-based.
